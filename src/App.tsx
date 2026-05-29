@@ -178,7 +178,7 @@ export function App() {
           <span className="eyebrow"><Library size={16} /> AnimeRec</span>
           <h1>Find the next anime that sits near what you already love.</h1>
           <p>
-            Search by title or paste a MyAnimeList URL. The local API can expand the catalog from MAL while keeping credentials out of the browser.
+            Search by title or paste a MyAnimeList URL.
           </p>
         </div>
 
