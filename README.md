@@ -14,10 +14,11 @@ A React/Vite anime recommendation prototype. It works today with a local starter
 
 ```bash
 npm install
+npm run dev:api
 npm run dev
 ```
 
-Then open the local URL Vite prints.
+Run the API and Vite app in separate terminals. Then open the local URL Vite prints.
 
 ## MyAnimeList API setup
 
@@ -31,6 +32,8 @@ VITE_ANIMEREC_API_URL=http://127.0.0.1:8787
 ```
 
 The MAL credentials are used only by local Node scripts. Do not expose the client secret through `VITE_*` variables because those are bundled into browser JavaScript.
+
+On Vercel, set `MAL_CLIENT_ID`, `MAL_CLIENT_SECRET`, and `MAL_RATE_LIMIT_PER_SECOND` as environment variables. Leave `VITE_ANIMEREC_API_URL` unset so the app calls same-origin `/api` routes.
 
 ## Sync MAL catalog data
 
@@ -63,6 +66,10 @@ npm run dev
 ```
 
 When a user searches for a title or MAL URL, the app checks local JSON storage first. If the local API is running and the anime is missing, it fetches the anime from MAL, appends it to `src/data/animeCatalog.json`, and returns recommendations against the updated catalog.
+
+## Deploy
+
+See [DEPLOYMENT.md](./DEPLOYMENT.md) for Vercel setup, persistence tradeoffs, and provider options.
 
 ## Data plan
 

@@ -97,8 +97,10 @@ export function App() {
           activeCatalog = result.catalog;
           setCatalog(result.catalog);
           setMessage(
-            result.stored
+            result.stored && result.persisted !== false
               ? `Fetched ${titleFor(result.anime)} from MAL and saved it to local JSON storage.`
+              : result.stored
+                ? `Fetched ${titleFor(result.anime)} from MAL for this session. Add a database to persist new runtime lookups after deploy.`
               : `Matched ${titleFor(result.anime)} from local JSON storage.`,
           );
           messageWasSet = true;

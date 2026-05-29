@@ -90,7 +90,7 @@ export class JikanProvider implements AnimeProvider {
 export class CatalogApiProvider implements AnimeProvider {
   name = "Local API + MAL";
 
-  constructor(private baseUrl = import.meta.env.VITE_ANIMEREC_API_URL || "http://127.0.0.1:8787") {}
+  constructor(private baseUrl = import.meta.env.VITE_ANIMEREC_API_URL || (import.meta.env.DEV ? "http://127.0.0.1:8787" : "")) {}
 
   async search(query: string) {
     const result = await this.lookup(query);
@@ -105,7 +105,7 @@ export class CatalogApiProvider implements AnimeProvider {
     return fetchJson<Anime[]>(`${this.baseUrl}/api/catalog`, 3500);
   }
 
-  async lookup(query: string): Promise<{ anime: Anime; catalog: Anime[]; stored: boolean } | null> {
+  async lookup(query: string): Promise<{ anime: Anime; catalog: Anime[]; stored: boolean; persisted?: boolean } | null> {
     const controller = new AbortController();
     const timeout = window.setTimeout(() => controller.abort(), 12000);
 
