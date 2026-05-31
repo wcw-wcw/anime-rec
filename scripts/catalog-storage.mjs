@@ -1,7 +1,8 @@
 import { mkdir, readFile, writeFile } from "node:fs/promises";
-import { dirname, resolve } from "node:path";
+import { dirname } from "node:path";
+import { fileURLToPath } from "node:url";
 
-export const catalogPath = resolve("src/data/animeCatalog.json");
+export const catalogPath = fileURLToPath(new URL("../src/data/animeCatalog.json", import.meta.url));
 
 export async function readCatalog(path = catalogPath) {
   try {

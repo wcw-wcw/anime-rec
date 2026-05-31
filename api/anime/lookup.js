@@ -1,6 +1,7 @@
 import { createMalClient } from "../../scripts/mal-client.mjs";
-import { readCatalog, mergeAnimeCatalog } from "../../scripts/catalog-storage.mjs";
+import { readCatalog } from "../../scripts/catalog-storage.mjs";
 import { extractMalId, findExistingAnime, pickBestSearchResult } from "../../scripts/catalog-lookup.mjs";
+import { databaseConfigured, ensureAnimeTable, getDatabaseCatalog, getSql, upsertAnimeCatalog } from "../../scripts/neon-db.mjs";
 
 export default async function handler(request, response) {
   if (request.method !== "GET") {
@@ -18,10 +19,14 @@ export default async function handler(request, response) {
       return;
     }
 
-    const catalog = await readCatalog();
+    const sql = databaseConfigured() ? getSql() : null;
+    if (sql) await ensureAnimeTable(sql);
+    const databaseCatalog = sql ? await getDatabaseCatalog(sql) : [];
+    const catalog = databaseCatalog.length ? databaseCatalog : await readCatalog();
     const existing = findExistingAnime(catalog, query);
     if (existing) {
-      response.status(200).json({ anime: existing, catalog, stored: false, persisted: true });
+      if (sql) await upsertAnimeCatalog([existing], sql);
+      response.status(200).json({ anime: existing, catalog, stored: false, persisted: Boolean(sql) });
       return;
     }
 
@@ -34,10 +39,21 @@ export default async function handler(request, response) {
       return;
     }
 
-    const sessionCatalog = mergeAnimeCatalog(catalog, [anime]);
+    if (sql) {
+      await upsertAnimeCatalog([anime], sql);
+      const updatedCatalog = await getDatabaseCatalog(sql);
+      response.status(200).json({
+        anime,
+        catalog: updatedCatalog,
+        stored: true,
+        persisted: true,
+      });
+      return;
+    }
+
     response.status(200).json({
       anime,
-      catalog: sessionCatalog,
+      catalog: [anime, ...catalog],
       stored: true,
       persisted: false,
     });

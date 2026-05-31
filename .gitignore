@@ -4,5 +4,4 @@ dist
 .env.*
 !.env.example
 .DS_Store
-deployment.md
-.md
+DEPLOYMENT.md

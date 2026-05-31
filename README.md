@@ -28,6 +28,7 @@ Create a `.env` file:
 MAL_CLIENT_ID=your_client_id_here
 MAL_CLIENT_SECRET=your_client_secret_here
 MAL_RATE_LIMIT_PER_SECOND=2
+DATABASE_URL=your_neon_pooled_connection_string
 VITE_ANIMEREC_API_URL=http://127.0.0.1:8787
 ```
 
@@ -49,7 +50,18 @@ Fetch and cache:
 npm run sync:mal
 ```
 
-The sync script writes deduplicated records to `src/data/animeCatalog.json` and throttles requests with `MAL_RATE_LIMIT_PER_SECOND`, defaulting to 2 requests per second.
+The sync script writes deduplicated records to `src/data/animeCatalog.json` and throttles requests with `MAL_RATE_LIMIT_PER_SECOND`, defaulting to 2 requests per second. Its current defaults request up to 3,500 ranked-list rows before deduplication.
+
+## Upload local catalog to Neon
+
+After attaching Neon and adding `DATABASE_URL` to your ignored `.env` file:
+
+```bash
+npm run db:migrate
+npm run db:import
+```
+
+The import uploads your locally synced JSON snapshot to Neon. This keeps the larger MAL batch sync off Vercel and avoids unnecessary production API/database traffic.
 
 ## Persistent lookup while developing
 
@@ -67,9 +79,6 @@ npm run dev
 
 When a user searches for a title or MAL URL, the app checks local JSON storage first. If the local API is running and the anime is missing, it fetches the anime from MAL, appends it to `src/data/animeCatalog.json`, and returns recommendations against the updated catalog.
 
-## Deploy
-
-See [DEPLOYMENT.md](./DEPLOYMENT.md) for Vercel setup, persistence tradeoffs, and provider options.
 
 ## Data plan
 

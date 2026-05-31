@@ -7,10 +7,13 @@
     "dev": "vite --host 127.0.0.1",
     "dev:api": "node scripts/catalog-api.mjs",
     "sync:mal": "node scripts/sync-mal-catalog.mjs",
+    "db:migrate": "node scripts/migrate-neon.mjs",
+    "db:import": "node scripts/import-neon-catalog.mjs",
     "build": "tsc && vite build",
     "preview": "vite preview --host 127.0.0.1"
   },
   "dependencies": {
+    "@neondatabase/serverless": "^1.1.0",
     "@vitejs/plugin-react": "^5.0.0",
     "lucide-react": "^0.468.0",
     "react": "^19.0.0",

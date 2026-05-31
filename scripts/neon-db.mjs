@@ -1,0 +1,208 @@
+import { neon } from "@neondatabase/serverless";
+
+export function databaseConfigured() {
+  return Boolean(process.env.DATABASE_URL);
+}
+
+export function getSql() {
+  if (!process.env.DATABASE_URL) throw new Error("Missing DATABASE_URL");
+  return neon(process.env.DATABASE_URL);
+}
+
+export async function ensureAnimeTable(sql = getSql()) {
+  await sql`create schema if not exists animerec`;
+  await sql`
+    create table if not exists animerec.anime (
+      mal_id integer primary key,
+      title_romaji text not null,
+      title_english text,
+      title_native text,
+      image_url text not null default '',
+      synopsis text not null default '',
+      genres jsonb not null default '[]'::jsonb,
+      themes jsonb not null default '[]'::jsonb,
+      demographics jsonb not null default '[]'::jsonb,
+      studios jsonb not null default '[]'::jsonb,
+      year integer,
+      format text not null default 'TV',
+      episodes integer,
+      score numeric,
+      rank integer,
+      popularity integer,
+      ranking_types jsonb not null default '[]'::jsonb,
+      source text not null default 'mal',
+      created_at timestamptz not null default now(),
+      updated_at timestamptz not null default now()
+    )
+  `;
+  await sql`create index if not exists anime_rank_idx on animerec.anime (rank nulls last)`;
+  await sql`create index if not exists anime_popularity_idx on animerec.anime (popularity nulls last)`;
+}
+
+export async function getDatabaseCatalog(sql = getSql()) {
+  const rows = await sql`
+    select
+      mal_id,
+      title_romaji,
+      title_english,
+      title_native,
+      image_url,
+      synopsis,
+      genres,
+      themes,
+      demographics,
+      studios,
+      year,
+      format,
+      episodes,
+      score,
+      rank,
+      popularity,
+      ranking_types,
+      source
+    from animerec.anime
+    order by rank nulls last, popularity nulls last, mal_id
+  `;
+  return rows.map(fromDatabaseRow);
+}
+
+export async function upsertAnimeCatalog(anime, sql = getSql()) {
+  if (!anime.length) return;
+  await ensureAnimeTable(sql);
+  for (let offset = 0; offset < anime.length; offset += 100) {
+    await upsertAnimeBatch(anime.slice(offset, offset + 100), sql);
+  }
+}
+
+async function upsertAnimeBatch(anime, sql) {
+  const records = anime.map(toDatabaseRecord);
+  await sql`
+    insert into animerec.anime (
+      mal_id,
+      title_romaji,
+      title_english,
+      title_native,
+      image_url,
+      synopsis,
+      genres,
+      themes,
+      demographics,
+      studios,
+      year,
+      format,
+      episodes,
+      score,
+      rank,
+      popularity,
+      ranking_types,
+      source
+    )
+    select
+      record.mal_id,
+      record.title_romaji,
+      record.title_english,
+      record.title_native,
+      record.image_url,
+      record.synopsis,
+      record.genres,
+      record.themes,
+      record.demographics,
+      record.studios,
+      record.year,
+      record.format,
+      record.episodes,
+      record.score,
+      record.rank,
+      record.popularity,
+      record.ranking_types,
+      record.source
+    from jsonb_to_recordset(${JSON.stringify(records)}::jsonb) as record(
+      mal_id integer,
+      title_romaji text,
+      title_english text,
+      title_native text,
+      image_url text,
+      synopsis text,
+      genres jsonb,
+      themes jsonb,
+      demographics jsonb,
+      studios jsonb,
+      year integer,
+      format text,
+      episodes integer,
+      score numeric,
+      rank integer,
+      popularity integer,
+      ranking_types jsonb,
+      source text
+    )
+    on conflict (mal_id) do update set
+      title_romaji = excluded.title_romaji,
+      title_english = excluded.title_english,
+      title_native = excluded.title_native,
+      image_url = excluded.image_url,
+      synopsis = excluded.synopsis,
+      genres = excluded.genres,
+      themes = excluded.themes,
+      demographics = excluded.demographics,
+      studios = excluded.studios,
+      year = excluded.year,
+      format = excluded.format,
+      episodes = excluded.episodes,
+      score = excluded.score,
+      rank = excluded.rank,
+      popularity = excluded.popularity,
+      ranking_types = excluded.ranking_types,
+      source = excluded.source,
+      updated_at = now()
+  `;
+}
+
+function toDatabaseRecord(anime) {
+  return {
+    mal_id: anime.malId ?? anime.id,
+    title_romaji: anime.title.romaji,
+    title_english: anime.title.english ?? null,
+    title_native: anime.title.native ?? null,
+    image_url: anime.imageUrl ?? "",
+    synopsis: anime.synopsis ?? "",
+    genres: anime.genres ?? [],
+    themes: anime.themes ?? [],
+    demographics: anime.demographics ?? [],
+    studios: anime.studios ?? [],
+    year: anime.year ?? null,
+    format: anime.format ?? "TV",
+    episodes: anime.episodes ?? null,
+    score: anime.score ?? null,
+    rank: anime.rank ?? null,
+    popularity: anime.popularity ?? null,
+    ranking_types: anime.rankingTypes ?? [],
+    source: anime.source ?? "mal",
+  };
+}
+
+function fromDatabaseRow(row) {
+  return {
+    id: row.mal_id,
+    malId: row.mal_id,
+    title: {
+      romaji: row.title_romaji,
+      english: row.title_english ?? undefined,
+      native: row.title_native ?? undefined,
+    },
+    imageUrl: row.image_url,
+    synopsis: row.synopsis,
+    genres: row.genres ?? [],
+    themes: row.themes ?? [],
+    demographics: row.demographics ?? [],
+    studios: row.studios ?? [],
+    year: row.year ?? undefined,
+    format: row.format,
+    episodes: row.episodes ?? undefined,
+    score: row.score === null ? undefined : Number(row.score),
+    rank: row.rank ?? undefined,
+    popularity: row.popularity ?? undefined,
+    rankingTypes: row.ranking_types ?? [],
+    source: row.source,
+  };
+}

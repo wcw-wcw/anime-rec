@@ -61,10 +61,11 @@ export async function createMalClient() {
   }
 
   return {
-    async ranking(rankingType, limit = 100) {
+    async ranking(rankingType, limit = 100, offset = 0) {
       const body = await request("/anime/ranking", {
         ranking_type: rankingType,
         limit,
+        offset,
         fields: defaultFields,
       });
 
