@@ -351,12 +351,14 @@ export function App() {
         </section>
       )}
 
-      <section className={`status-strip status-${lookupState}`}>
-        <span>{message}</span>
-        <a href="https://myanimelist.net/apiconfig/references/api/v2" target="_blank" rel="noreferrer">
-          API reference <ExternalLink size={14} />
-        </a>
-      </section>
+      {activeView === "recommend" && (
+        <section className={`status-strip status-${lookupState}`}>
+          <span>{message}</span>
+          <a href="https://myanimelist.net/apiconfig/references/api/v2" target="_blank" rel="noreferrer">
+            API reference <ExternalLink size={14} />
+          </a>
+        </section>
+      )}
 
       {activeView === "detail" ? (
         detailAnime ? (
@@ -452,14 +454,16 @@ export function App() {
                 <div className="similar-grid">
                   {similarAnime.map((rec) => (
                     <article key={rec.anime.id} className="similar-card">
-                      <AnimePoster anime={rec.anime} />
-                      <div className="similar-card-body">
+                      <div className="similar-media">
+                        <AnimePoster anime={rec.anime} />
                         <div className="card-topline">
                           <SourcePill source={rec.anime.source} />
                           <span className={`match-pill match-${strengthTone(matchStrength(rec.score, similarAnime[0]?.score ?? 0))}`}>
                             {matchStrength(rec.score, similarAnime[0]?.score ?? 0)} match
                           </span>
                         </div>
+                      </div>
+                      <div className="similar-card-body">
                         <h3>{titleFor(rec.anime)}</h3>
                         <p>{rec.reasons.length ? rec.reasons.join(". ") : rec.anime.synopsis || "Similar metadata and tags."}</p>
                         <div className="detail-card-actions">
