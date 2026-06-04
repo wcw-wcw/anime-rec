@@ -1,8 +1,18 @@
 import { FormEvent, useEffect, useMemo, useState } from "react";
-import { ExternalLink, Gauge, Library, LinkIcon, Search, SlidersHorizontal, Sparkles } from "lucide-react";
+import { Calendar, ExternalLink, Gauge, ImageOff, Library, LinkIcon, Search, SlidersHorizontal, Sparkles, Star } from "lucide-react";
 import { localCatalog } from "./data/catalog";
 import { CatalogApiProvider, JikanProvider, LocalCatalogProvider } from "./services/animeProvider";
 import type { Anime, Recommendation } from "./types";
+import {
+  filterAnimeCatalog,
+  getAnimeDisplayTitle,
+  getUniqueFormats,
+  getUniqueGenres,
+  getUniqueYears,
+  sortAnimeCatalog,
+  type CatalogFilters,
+  type CatalogSortMode,
+} from "./utils/catalog";
 import { extractMalId, factorPercent, findAnime, matchStrength, recommendAnime, relativePercent, strengthTone } from "./utils/recommendation";
 
 const localProvider = new LocalCatalogProvider();
@@ -11,7 +21,17 @@ const jikanProvider = new JikanProvider();
 const defaultQuery = "Fullmetal Alchemist: Brotherhood";
 const defaultAnime = findAnime(defaultQuery, localCatalog)[0]?.anime ?? localCatalog[0] ?? null;
 
-const titleFor = (anime: Anime) => anime.title.english || anime.title.romaji;
+const titleFor = getAnimeDisplayTitle;
+
+type ActiveView = "recommend" | "catalog";
+
+const defaultCatalogFilters: CatalogFilters = {
+  query: "",
+  genre: "",
+  format: "",
+  year: "",
+  minScore: 0,
+};
 
 const SourcePill = ({ source }: { source: Anime["source"] }) => (
   <span className={`source source-${source}`}>{source === "mal" ? "MAL" : source === "jikan" ? "Jikan" : "Local"}</span>
@@ -35,10 +55,32 @@ const EmptyState = () => (
   </section>
 );
 
+const AnimePoster = ({ anime, className = "" }: { anime: Anime; className?: string }) => {
+  const [failed, setFailed] = useState(!anime.imageUrl);
+
+  useEffect(() => {
+    setFailed(!anime.imageUrl);
+  }, [anime.imageUrl]);
+
+  if (failed) {
+    return (
+      <div className={`poster-fallback ${className}`} aria-label={`No poster available for ${titleFor(anime)}`}>
+        <ImageOff size={24} />
+      </div>
+    );
+  }
+
+  return <img className={className} src={anime.imageUrl} alt="" onError={() => setFailed(true)} />;
+};
+
 export function App() {
+  const [activeView, setActiveView] = useState<ActiveView>("recommend");
   const [query, setQuery] = useState(defaultQuery);
   const [count, setCount] = useState(8);
   const [catalog, setCatalog] = useState<Anime[]>(localCatalog);
+  const [catalogLoadState, setCatalogLoadState] = useState<"loading" | "ready" | "error">(localCatalog.length ? "ready" : "loading");
+  const [catalogFilters, setCatalogFilters] = useState<CatalogFilters>(defaultCatalogFilters);
+  const [catalogSort, setCatalogSort] = useState<CatalogSortMode>("popularity");
   const [selected, setSelected] = useState<Anime | null>(defaultAnime);
   const [recommendations, setRecommendations] = useState<Recommendation[]>(() => (defaultAnime ? recommendAnime(defaultAnime, localCatalog, 8) : []));
   const [lookupState, setLookupState] = useState<"idle" | "loading" | "ready" | "error">("ready");
@@ -53,7 +95,10 @@ export function App() {
     apiProvider
       .getCatalog()
       .then((remoteCatalog) => {
-        if (!remoteCatalog.length) return;
+        if (!remoteCatalog.length) {
+          setCatalogLoadState("ready");
+          return;
+        }
         setCatalog(remoteCatalog);
         localProvider.setCatalog(remoteCatalog);
         setProviderName(apiProvider.name);
@@ -63,13 +108,19 @@ export function App() {
           setRecommendations(recommendAnime(refreshedDefault, remoteCatalog, count));
         }
         setMessage(`Loaded ${remoteCatalog.length} anime from local JSON storage.`);
+        setCatalogLoadState("ready");
       })
       .catch(() => {
+        setCatalogLoadState(localCatalog.length ? "ready" : "error");
         setMessage(`Using bundled fallback catalog with ${localCatalog.length} anime. Start npm run dev:api for persistent MAL lookups.`);
       });
   }, []);
 
   const matches = useMemo(() => findAnime(query, catalog).slice(0, 5), [catalog, query]);
+  const genres = useMemo(() => getUniqueGenres(catalog), [catalog]);
+  const formats = useMemo(() => getUniqueFormats(catalog), [catalog]);
+  const years = useMemo(() => getUniqueYears(catalog), [catalog]);
+  const catalogResults = useMemo(() => sortAnimeCatalog(filterAnimeCatalog(catalog, catalogFilters), catalogSort), [catalog, catalogFilters, catalogSort]);
   const grouped = useMemo(() => {
     return recommendations.reduce<Record<string, Recommendation[]>>((acc, rec) => {
       acc[rec.cluster] = [...(acc[rec.cluster] ?? []), rec];
@@ -173,55 +224,83 @@ export function App() {
     if (selected) setRecommendations(recommendAnime(selected, catalog, nextCount));
   };
 
+  const updateCatalogFilter = <Key extends keyof CatalogFilters>(key: Key, value: CatalogFilters[Key]) => {
+    setCatalogFilters((current) => ({ ...current, [key]: value }));
+  };
+
+  const recommendFromCatalog = (anime: Anime) => {
+    const title = titleFor(anime);
+    setQuery(title);
+    setSelected(anime);
+    setRecommendations(recommendAnime(anime, catalog, count));
+    setProviderName(localProvider.name);
+    setLookupState("ready");
+    setActiveView("recommend");
+    setMessage(`Matched ${title} from the catalog. Recommendations are ready below.`);
+  };
+
   return (
     <main className="app-shell">
-      <section className="hero">
-        <div className="hero-copy">
-          <span className="eyebrow"><Library size={16} /> AnimeRec</span>
-          <h1>Find the next anime that sits near what you already love.</h1>
-          <p>
-            Search by title or paste a MyAnimeList URL.
-          </p>
-        </div>
+      <nav className="app-nav" aria-label="Primary">
+        <button type="button" className={activeView === "recommend" ? "active" : ""} onClick={() => setActiveView("recommend")}>
+          <Sparkles size={17} />
+          Recommend
+        </button>
+        <button type="button" className={activeView === "catalog" ? "active" : ""} onClick={() => setActiveView("catalog")}>
+          <Library size={17} />
+          Catalog
+        </button>
+      </nav>
 
-        <form className="search-panel" onSubmit={runRecommendation}>
-          <label htmlFor="anime-query">Anime title or database link</label>
-          <div className="search-row">
-            <Search size={20} />
-            <input
-              id="anime-query"
-              value={query}
-              onChange={(event) => setQuery(event.target.value)}
-              placeholder="e.g. Steins;Gate or https://myanimelist.net/anime/9253"
-            />
-            <button type="submit" disabled={lookupState === "loading"}>
-              {lookupState === "loading" ? "Searching" : "Recommend"}
-            </button>
+      {activeView === "recommend" && (
+        <section className="hero">
+          <div className="hero-copy">
+            <span className="eyebrow"><Library size={16} /> AnimeRec</span>
+            <h1>Find the next anime that sits near what you already love.</h1>
+            <p>
+              Search by title or paste a MyAnimeList URL.
+            </p>
           </div>
 
-          <div className="controls-row">
-            <label className="count-control" htmlFor="count">
-              <SlidersHorizontal size={18} />
-              <span>{count} results</span>
-              <input id="count" type="range" min="3" max="50" value={count} onChange={(event) => refreshCount(Number(event.target.value))} />
-            </label>
-            <div className="provider-chip">
-              <Gauge size={18} />
-              <span>{providerName}</span>
+          <form className="search-panel" onSubmit={runRecommendation}>
+            <label htmlFor="anime-query">Anime title or database link</label>
+            <div className="search-row">
+              <Search size={20} />
+              <input
+                id="anime-query"
+                value={query}
+                onChange={(event) => setQuery(event.target.value)}
+                placeholder="e.g. Steins;Gate or https://myanimelist.net/anime/9253"
+              />
+              <button type="submit" disabled={lookupState === "loading"}>
+                {lookupState === "loading" ? "Searching" : "Recommend"}
+              </button>
             </div>
-          </div>
 
-          {matches.length > 0 && (
-            <div className="suggestions">
-              {matches.map(({ anime }) => (
-                <button key={anime.id} type="button" onClick={() => pickSuggestion(anime)}>
-                  {titleFor(anime)}
-                </button>
-              ))}
+            <div className="controls-row">
+              <label className="count-control" htmlFor="count">
+                <SlidersHorizontal size={18} />
+                <span>{count} results</span>
+                <input id="count" type="range" min="3" max="50" value={count} onChange={(event) => refreshCount(Number(event.target.value))} />
+              </label>
+              <div className="provider-chip">
+                <Gauge size={18} />
+                <span>{providerName}</span>
+              </div>
             </div>
-          )}
-        </form>
-      </section>
+
+            {matches.length > 0 && (
+              <div className="suggestions">
+                {matches.map(({ anime }) => (
+                  <button key={anime.id} type="button" onClick={() => pickSuggestion(anime)}>
+                    {titleFor(anime)}
+                  </button>
+                ))}
+              </div>
+            )}
+          </form>
+        </section>
+      )}
 
       <section className={`status-strip status-${lookupState}`}>
         <span>{message}</span>
@@ -230,11 +309,137 @@ export function App() {
         </a>
       </section>
 
-      {selected ? (
+      {activeView === "catalog" ? (
+        <section className="catalog-page">
+          <div className="catalog-heading">
+            <div>
+              <span className="eyebrow"><Library size={16} /> Browse catalog</span>
+              <h1>Explore every loaded anime.</h1>
+            </div>
+            <span className="catalog-count">{catalogResults.length} of {catalog.length} titles</span>
+          </div>
+
+          <section className="catalog-tools" aria-label="Catalog filters">
+            <label className="catalog-search" htmlFor="catalog-query">
+              <Search size={19} />
+              <input
+                id="catalog-query"
+                value={catalogFilters.query}
+                onChange={(event) => updateCatalogFilter("query", event.target.value)}
+                placeholder="Search titles or synopses"
+              />
+            </label>
+
+            <label>
+              Genre
+              <select value={catalogFilters.genre} onChange={(event) => updateCatalogFilter("genre", event.target.value)}>
+                <option value="">All genres</option>
+                {genres.map((genre) => (
+                  <option key={genre} value={genre}>{genre}</option>
+                ))}
+              </select>
+            </label>
+
+            <label>
+              Format
+              <select value={catalogFilters.format} onChange={(event) => updateCatalogFilter("format", event.target.value)}>
+                <option value="">All formats</option>
+                {formats.map((format) => (
+                  <option key={format} value={format}>{format}</option>
+                ))}
+              </select>
+            </label>
+
+            <label>
+              Year
+              <select value={catalogFilters.year} onChange={(event) => updateCatalogFilter("year", event.target.value)}>
+                <option value="">Any year</option>
+                {years.map((year) => (
+                  <option key={year} value={year}>{year}</option>
+                ))}
+              </select>
+            </label>
+
+            <label>
+              Min score
+              <select value={catalogFilters.minScore} onChange={(event) => updateCatalogFilter("minScore", Number(event.target.value))}>
+                <option value={0}>Any score</option>
+                <option value={6}>6.0+</option>
+                <option value={7}>7.0+</option>
+                <option value={8}>8.0+</option>
+                <option value={9}>9.0+</option>
+              </select>
+            </label>
+
+            <label>
+              Sort
+              <select value={catalogSort} onChange={(event) => setCatalogSort(event.target.value as CatalogSortMode)}>
+                <option value="popularity">Popularity</option>
+                <option value="score">Score</option>
+                <option value="year">Year</option>
+                <option value="title">Title</option>
+                <option value="rank">Rank</option>
+              </select>
+            </label>
+          </section>
+
+          {catalogLoadState === "loading" && !catalog.length ? (
+            <section className="empty-state catalog-state">
+              <Sparkles size={24} />
+              <h2>Loading the catalog.</h2>
+              <p>The app is checking the current anime source before filling this view.</p>
+            </section>
+          ) : catalog.length === 0 || catalogLoadState === "error" ? (
+            <section className="empty-state catalog-state">
+              <Library size={24} />
+              <h2>No catalog data is available yet.</h2>
+              <p>Once local or API-loaded anime are available, they will appear here.</p>
+            </section>
+          ) : catalogResults.length === 0 ? (
+            <section className="empty-state catalog-state">
+              <Search size={24} />
+              <h2>No anime match those filters.</h2>
+              <p>Try a broader title search, a different genre, or a lower score threshold.</p>
+            </section>
+          ) : (
+            <div className="catalog-grid">
+              {catalogResults.map((anime) => (
+                <article key={`${anime.source}-${anime.id}-${anime.malId ?? "local"}`} className="catalog-card">
+                  <div className="catalog-poster">
+                    <AnimePoster anime={anime} />
+                  </div>
+                  <div className="catalog-card-body">
+                    <div className="card-topline">
+                      <SourcePill source={anime.source} />
+                      <span>{anime.format} {anime.year ? `· ${anime.year}` : ""}</span>
+                    </div>
+                    <h2>{titleFor(anime)}</h2>
+                    <div className="catalog-stats">
+                      <span><Star size={14} /> {anime.score ? anime.score.toFixed(2) : "No score"}</span>
+                      <span><Gauge size={14} /> {anime.popularity ? `#${anime.popularity}` : anime.rank ? `Rank #${anime.rank}` : "Unranked"}</span>
+                      <span><Calendar size={14} /> {anime.episodes ? `${anime.episodes} eps` : "Episodes TBD"}</span>
+                    </div>
+                    <p>{anime.synopsis || "No synopsis is available for this title yet."}</p>
+                    <div className="catalog-tags">
+                      {(anime.genres ?? []).slice(0, 4).map((genre) => (
+                        <span key={genre}>{genre}</span>
+                      ))}
+                    </div>
+                    <button type="button" onClick={() => recommendFromCatalog(anime)}>
+                      <Sparkles size={16} />
+                      Recommend from this
+                    </button>
+                  </div>
+                </article>
+              ))}
+            </div>
+          )}
+        </section>
+      ) : selected ? (
         <section className="workspace">
           <aside className="selected-panel">
             <div className="poster-frame">
-              <img src={selected.imageUrl} alt="" />
+              <AnimePoster anime={selected} />
             </div>
             <div className="selected-copy">
               <SourcePill source={selected.source} />
@@ -317,7 +522,7 @@ export function App() {
                   <div className="card-grid">
                     {items.map((rec) => (
                       <article key={rec.anime.id} className="anime-card">
-                        <img src={rec.anime.imageUrl} alt="" />
+                        <AnimePoster anime={rec.anime} />
                         <div className="card-body">
                           <div className="card-topline">
                             <SourcePill source={rec.anime.source} />
