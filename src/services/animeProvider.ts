@@ -2,6 +2,34 @@ import type { Anime } from "../types";
 import { localCatalog } from "../data/catalog";
 import { extractMalId, findAnime } from "../utils/recommendation";
 
+interface JikanNamedResource {
+  name: string;
+}
+
+interface JikanAnime {
+  mal_id: number;
+  title?: string | null;
+  title_english?: string | null;
+  title_japanese?: string | null;
+  images?: {
+    jpg?: {
+      image_url?: string | null;
+      large_image_url?: string | null;
+    };
+  };
+  synopsis?: string | null;
+  genres?: JikanNamedResource[];
+  themes?: JikanNamedResource[];
+  demographics?: JikanNamedResource[];
+  studios?: JikanNamedResource[];
+  year?: number | null;
+  type?: string | null;
+  episodes?: number | null;
+  score?: number | null;
+  rank?: number | null;
+  popularity?: number | null;
+}
+
 export interface AnimeProvider {
   name: string;
   search(query: string): Promise<Anime[]>;
@@ -9,7 +37,7 @@ export interface AnimeProvider {
   getCatalog(): Promise<Anime[]>;
 }
 
-const mapJikanAnime = (item: any): Anime => ({
+const mapJikanAnime = (item: JikanAnime): Anime => ({
   id: item.mal_id,
   malId: item.mal_id,
   title: {
@@ -19,14 +47,15 @@ const mapJikanAnime = (item: any): Anime => ({
   },
   imageUrl: item.images?.jpg?.large_image_url ?? item.images?.jpg?.image_url ?? "",
   synopsis: item.synopsis ?? "",
-  genres: item.genres?.map((genre: any) => genre.name) ?? [],
-  themes: item.themes?.map((theme: any) => theme.name) ?? [],
-  demographics: item.demographics?.map((demo: any) => demo.name) ?? [],
-  studios: item.studios?.map((studio: any) => studio.name) ?? [],
+  genres: item.genres?.map((genre) => genre.name) ?? [],
+  themes: item.themes?.map((theme) => theme.name) ?? [],
+  demographics: item.demographics?.map((demo) => demo.name) ?? [],
+  studios: item.studios?.map((studio) => studio.name) ?? [],
   year: item.year ?? undefined,
   format: item.type === "Movie" ? "Movie" : item.type === "OVA" ? "OVA" : item.type === "ONA" ? "ONA" : item.type === "Special" ? "Special" : "TV",
   episodes: item.episodes ?? undefined,
   score: item.score ?? undefined,
+  rank: item.rank ?? undefined,
   popularity: item.popularity ?? undefined,
   source: "jikan",
 });
@@ -71,14 +100,14 @@ export class JikanProvider implements AnimeProvider {
   name = "Jikan";
 
   async search(query: string) {
-    const body = await fetchJson<{ data?: any[] }>(`https://api.jikan.moe/v4/anime?q=${encodeURIComponent(query)}&limit=10&sfw=true`);
+    const body = await fetchJson<{ data?: JikanAnime[] }>(`https://api.jikan.moe/v4/anime?q=${encodeURIComponent(query)}&limit=10&sfw=true`);
     return (body.data ?? []).map(mapJikanAnime);
   }
 
   async getByUrl(url: string) {
     const id = extractMalId(url);
     if (!id) return null;
-    const body = await fetchJson<{ data?: any }>(`https://api.jikan.moe/v4/anime/${id}/full`);
+    const body = await fetchJson<{ data?: JikanAnime }>(`https://api.jikan.moe/v4/anime/${id}/full`);
     return body.data ? mapJikanAnime(body.data) : null;
   }
 

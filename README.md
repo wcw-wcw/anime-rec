@@ -6,6 +6,7 @@ A React/Vite anime recommendation prototype. It works today with a local starter
 
 - Search by anime title or MyAnimeList anime URL.
 - Browse the loaded catalog with title/synopsis search, metadata filters, and sorting.
+- Open anime detail views with poster art, synopsis, metadata, source info, and similar recommendations.
 - Choose how many recommendations to return.
 - Local similarity engine using genres, themes, demographics, synopsis/title token overlap, format, year, and studio.
 - Cluster labels for nearby groups such as battle fantasy, emotional drama, and speculative systems.
@@ -16,6 +17,12 @@ A React/Vite anime recommendation prototype. It works today with a local starter
 Use the Catalog tab to browse every anime currently loaded into the app. The catalog supports search across titles and synopses, genre/format/year filters, minimum score filtering, and sorting by popularity, score, year, title, or rank.
 
 Catalog cards use the same local/API-loaded anime records as the recommendation flow. Today that means bundled seed data plus the local JSON/API catalog when available; later this view is a natural candidate for Neon-backed querying once the dataset grows beyond what should be filtered in the browser.
+
+## Anime detail view
+
+Catalog cards, recommendation cards, and the currently selected source anime can open a detail view. Details include poster fallback handling, romaji/native titles, synopsis, score, rank, popularity, format/year/episodes, studios, genres, themes, demographics, source metadata, and MyAnimeList links when available.
+
+The detail view uses the currently loaded local/API catalog and the existing metadata recommender to show similar anime. It can also start a fresh recommendation run from the displayed anime without introducing separate routes or authentication.
 
 ## Run it
 

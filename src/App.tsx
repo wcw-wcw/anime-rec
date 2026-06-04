@@ -1,11 +1,14 @@
 import { FormEvent, useEffect, useMemo, useState } from "react";
-import { Calendar, ExternalLink, Gauge, ImageOff, Library, LinkIcon, Search, SlidersHorizontal, Sparkles, Star } from "lucide-react";
+import { ArrowLeft, Calendar, ExternalLink, Gauge, ImageOff, Info, Library, LinkIcon, Search, SlidersHorizontal, Sparkles, Star } from "lucide-react";
 import { localCatalog } from "./data/catalog";
 import { CatalogApiProvider, JikanProvider, LocalCatalogProvider } from "./services/animeProvider";
 import type { Anime, Recommendation } from "./types";
 import {
   filterAnimeCatalog,
+  formatAnimeMetadata,
+  getAnimeById,
   getAnimeDisplayTitle,
+  getAnimeSubtitle,
   getUniqueFormats,
   getUniqueGenres,
   getUniqueYears,
@@ -23,7 +26,7 @@ const defaultAnime = findAnime(defaultQuery, localCatalog)[0]?.anime ?? localCat
 
 const titleFor = getAnimeDisplayTitle;
 
-type ActiveView = "recommend" | "catalog";
+type ActiveView = "recommend" | "catalog" | "detail";
 
 const defaultCatalogFilters: CatalogFilters = {
   query: "",
@@ -73,8 +76,22 @@ const AnimePoster = ({ anime, className = "" }: { anime: Anime; className?: stri
   return <img className={className} src={anime.imageUrl} alt="" onError={() => setFailed(true)} />;
 };
 
+const ChipList = ({ items, emptyLabel = "Unknown" }: { items: string[] | undefined; emptyLabel?: string }) => {
+  const values = items?.filter(Boolean) ?? [];
+  if (!values.length) return <span className="muted-chip">{emptyLabel}</span>;
+
+  return (
+    <>
+      {values.map((item) => (
+        <span key={item}>{item}</span>
+      ))}
+    </>
+  );
+};
+
 export function App() {
   const [activeView, setActiveView] = useState<ActiveView>("recommend");
+  const [detailBackView, setDetailBackView] = useState<Exclude<ActiveView, "detail">>("catalog");
   const [query, setQuery] = useState(defaultQuery);
   const [count, setCount] = useState(8);
   const [catalog, setCatalog] = useState<Anime[]>(localCatalog);
@@ -83,6 +100,7 @@ export function App() {
   const [catalogSort, setCatalogSort] = useState<CatalogSortMode>("popularity");
   const [selected, setSelected] = useState<Anime | null>(defaultAnime);
   const [recommendations, setRecommendations] = useState<Recommendation[]>(() => (defaultAnime ? recommendAnime(defaultAnime, localCatalog, 8) : []));
+  const [selectedDetailAnime, setSelectedDetailAnime] = useState<Anime | null>(null);
   const [lookupState, setLookupState] = useState<"idle" | "loading" | "ready" | "error">("ready");
   const [message, setMessage] = useState("Using local catalog data. Start the local API to fetch and store missing MAL entries.");
   const [providerName, setProviderName] = useState(localProvider.name);
@@ -121,6 +139,15 @@ export function App() {
   const formats = useMemo(() => getUniqueFormats(catalog), [catalog]);
   const years = useMemo(() => getUniqueYears(catalog), [catalog]);
   const catalogResults = useMemo(() => sortAnimeCatalog(filterAnimeCatalog(catalog, catalogFilters), catalogSort), [catalog, catalogFilters, catalogSort]);
+  const detailAnime = useMemo(() => {
+    if (!selectedDetailAnime) return null;
+    return getAnimeById(catalog, selectedDetailAnime.id) ?? selectedDetailAnime;
+  }, [catalog, selectedDetailAnime]);
+  const similarAnime = useMemo(() => {
+    if (!detailAnime) return [];
+    const comparisonCatalog = [detailAnime, ...catalog.filter((anime) => anime.id !== detailAnime.id && anime.malId !== detailAnime.malId)];
+    return recommendAnime(detailAnime, comparisonCatalog, 6);
+  }, [catalog, detailAnime]);
   const grouped = useMemo(() => {
     return recommendations.reduce<Record<string, Recommendation[]>>((acc, rec) => {
       acc[rec.cluster] = [...(acc[rec.cluster] ?? []), rec];
@@ -239,14 +266,36 @@ export function App() {
     setMessage(`Matched ${title} from the catalog. Recommendations are ready below.`);
   };
 
+  const openAnimeDetail = (anime: Anime) => {
+    setSelectedDetailAnime(anime);
+    setDetailBackView(activeView === "detail" ? detailBackView : activeView);
+    setActiveView("detail");
+  };
+
+  const goBackFromDetail = () => {
+    setActiveView(detailBackView);
+  };
+
+  const recommendFromAnime = (anime: Anime) => {
+    const title = titleFor(anime);
+    const comparisonCatalog = [anime, ...catalog.filter((item) => item.id !== anime.id && item.malId !== anime.malId)];
+    setQuery(title);
+    setSelected(anime);
+    setRecommendations(recommendAnime(anime, comparisonCatalog, count));
+    setProviderName(localProvider.name);
+    setLookupState("ready");
+    setActiveView("recommend");
+    setMessage(`Matched ${title}. Recommendations are ready below.`);
+  };
+
   return (
     <main className="app-shell">
       <nav className="app-nav" aria-label="Primary">
-        <button type="button" className={activeView === "recommend" ? "active" : ""} onClick={() => setActiveView("recommend")}>
+        <button type="button" className={activeView === "recommend" || (activeView === "detail" && detailBackView === "recommend") ? "active" : ""} onClick={() => setActiveView("recommend")}>
           <Sparkles size={17} />
           Recommend
         </button>
-        <button type="button" className={activeView === "catalog" ? "active" : ""} onClick={() => setActiveView("catalog")}>
+        <button type="button" className={activeView === "catalog" || (activeView === "detail" && detailBackView === "catalog") ? "active" : ""} onClick={() => setActiveView("catalog")}>
           <Library size={17} />
           Catalog
         </button>
@@ -309,7 +358,144 @@ export function App() {
         </a>
       </section>
 
-      {activeView === "catalog" ? (
+      {activeView === "detail" ? (
+        detailAnime ? (
+          <section className="detail-page">
+            <button type="button" className="back-button" onClick={goBackFromDetail}>
+              <ArrowLeft size={18} />
+              Back to {detailBackView === "catalog" ? "Catalog" : "Recommend"}
+            </button>
+
+            <article className="detail-hero">
+              <aside className="detail-poster-panel">
+                <div className="detail-poster-frame">
+                  <AnimePoster anime={detailAnime} />
+                </div>
+                <button type="button" className="primary-action" onClick={() => recommendFromAnime(detailAnime)}>
+                  <Sparkles size={17} />
+                  Recommend from this anime
+                </button>
+                {detailAnime.malId && (
+                  <a href={`https://myanimelist.net/anime/${detailAnime.malId}`} target="_blank" rel="noreferrer" className="secondary-action">
+                    <LinkIcon size={16} />
+                    View on MyAnimeList
+                  </a>
+                )}
+              </aside>
+
+              <div className="detail-content">
+                <div className="detail-title-block">
+                  <div className="card-topline">
+                    <SourcePill source={detailAnime.source} />
+                    <span>{formatAnimeMetadata(detailAnime).format} {detailAnime.year ? `· ${detailAnime.year}` : ""}</span>
+                  </div>
+                  <h1>{detailAnime.title.romaji || titleFor(detailAnime)}</h1>
+                  {getAnimeSubtitle(detailAnime) && <p className="detail-subtitle">{getAnimeSubtitle(detailAnime)}</p>}
+                  {detailAnime.title.native && <p className="native-title">{detailAnime.title.native}</p>}
+                </div>
+
+                <div className="detail-stat-grid" aria-label="Anime metadata">
+                  {Object.entries(formatAnimeMetadata(detailAnime)).map(([label, value]) => (
+                    <div key={label}>
+                      <span>{label}</span>
+                      <strong>{value}</strong>
+                    </div>
+                  ))}
+                </div>
+
+                <section className="detail-section">
+                  <h2>Synopsis</h2>
+                  <p>{detailAnime.synopsis || "No synopsis is available for this title yet."}</p>
+                </section>
+
+                <div className="detail-taxonomy">
+                  <section className="detail-section">
+                    <h2>Genres</h2>
+                    <div className="tag-cloud">
+                      <ChipList items={detailAnime.genres} />
+                    </div>
+                  </section>
+                  <section className="detail-section">
+                    <h2>Themes and tags</h2>
+                    <div className="tag-cloud">
+                      <ChipList items={detailAnime.themes} />
+                    </div>
+                  </section>
+                  <section className="detail-section">
+                    <h2>Demographics</h2>
+                    <div className="tag-cloud">
+                      <ChipList items={detailAnime.demographics} />
+                    </div>
+                  </section>
+                </div>
+
+                <section className="detail-section source-section">
+                  <h2>Source info</h2>
+                  <div className="source-info-list">
+                    <span><Info size={15} /> {detailAnime.source === "mal" ? "MyAnimeList API" : detailAnime.source === "jikan" ? "Jikan fallback" : "Loaded catalog"}</span>
+                    <span>{detailAnime.malId ? `MAL ID #${detailAnime.malId}` : "No MAL ID available"}</span>
+                    <span>{detailAnime.rankingTypes?.length ? detailAnime.rankingTypes.join(", ") : "No ranking type metadata"}</span>
+                  </div>
+                </section>
+              </div>
+            </article>
+
+            <section className="similar-section">
+              <div className="section-heading">
+                <div>
+                  <span className="eyebrow">Similar anime</span>
+                  <h2>Nearby recommendations</h2>
+                </div>
+                <span className="catalog-count">{similarAnime.length} matches</span>
+              </div>
+              {similarAnime.length ? (
+                <div className="similar-grid">
+                  {similarAnime.map((rec) => (
+                    <article key={rec.anime.id} className="similar-card">
+                      <AnimePoster anime={rec.anime} />
+                      <div className="similar-card-body">
+                        <div className="card-topline">
+                          <SourcePill source={rec.anime.source} />
+                          <span className={`match-pill match-${strengthTone(matchStrength(rec.score, similarAnime[0]?.score ?? 0))}`}>
+                            {matchStrength(rec.score, similarAnime[0]?.score ?? 0)} match
+                          </span>
+                        </div>
+                        <h3>{titleFor(rec.anime)}</h3>
+                        <p>{rec.reasons.length ? rec.reasons.join(". ") : rec.anime.synopsis || "Similar metadata and tags."}</p>
+                        <div className="detail-card-actions">
+                          <button type="button" className="secondary-button" onClick={() => openAnimeDetail(rec.anime)}>
+                            <Info size={15} />
+                            View details
+                          </button>
+                          <button type="button" className="primary-button" onClick={() => recommendFromAnime(rec.anime)}>
+                            <Sparkles size={15} />
+                            Recommend
+                          </button>
+                        </div>
+                      </div>
+                    </article>
+                  ))}
+                </div>
+              ) : (
+                <section className="empty-state catalog-state">
+                  <Sparkles size={24} />
+                  <h2>No similar anime found yet.</h2>
+                  <p>The current catalog needs more nearby titles before this section can fill in.</p>
+                </section>
+              )}
+            </section>
+          </section>
+        ) : (
+          <section className="empty-state catalog-state">
+            <Library size={24} />
+            <h2>That anime is not available.</h2>
+            <p>The detail record could not be found in the current loaded catalog.</p>
+            <button type="button" className="primary-action inline-action" onClick={() => setActiveView("catalog")}>
+              Back to Catalog
+            </button>
+          </section>
+        )
+      ) : activeView === "catalog" ? (
         <section className="catalog-page">
           <div className="catalog-heading">
             <div>
@@ -425,10 +611,16 @@ export function App() {
                         <span key={genre}>{genre}</span>
                       ))}
                     </div>
-                    <button type="button" onClick={() => recommendFromCatalog(anime)}>
-                      <Sparkles size={16} />
-                      Recommend from this
-                    </button>
+                    <div className="catalog-card-actions">
+                      <button type="button" className="secondary-button" onClick={() => openAnimeDetail(anime)}>
+                        <Info size={15} />
+                        View details
+                      </button>
+                      <button type="button" className="primary-button" onClick={() => recommendFromCatalog(anime)}>
+                        <Sparkles size={16} />
+                        Recommend
+                      </button>
+                    </div>
                   </div>
                 </article>
               ))}
@@ -452,10 +644,14 @@ export function App() {
                 <span>{selected.episodes ? `${selected.episodes} eps` : "Episodes TBD"}</span>
               </div>
               <div className="tag-cloud">
-                {[...selected.genres, ...selected.themes, ...selected.demographics].map((tag) => (
+                {[...(selected.genres ?? []), ...(selected.themes ?? []), ...(selected.demographics ?? [])].map((tag) => (
                   <span key={tag}>{tag}</span>
                 ))}
               </div>
+              <button type="button" className="secondary-action selected-detail-action" onClick={() => openAnimeDetail(selected)}>
+                <Info size={16} />
+                View details
+              </button>
             </div>
           </aside>
 
@@ -542,6 +738,16 @@ export function App() {
                             {rec.reasons.map((reason) => (
                               <span key={reason}>{reason}</span>
                             ))}
+                          </div>
+                          <div className="detail-card-actions">
+                            <button type="button" className="secondary-button" onClick={() => openAnimeDetail(rec.anime)}>
+                              <Info size={15} />
+                              View details
+                            </button>
+                            <button type="button" className="primary-button" onClick={() => recommendFromAnime(rec.anime)}>
+                              <Sparkles size={15} />
+                              Recommend
+                            </button>
                           </div>
                           {rec.anime.malId && (
                             <div className="card-footer">

@@ -59,7 +59,7 @@ type Vector = Map<string, number>;
 
 const buildIdf = (catalog: Anime[]) => {
   const documentCounts = new Map<string, number>();
-  const documents = catalog.map((anime) => new Set(tokenize(anime.synopsis)));
+  const documents = catalog.map((anime) => new Set(tokenize(anime.synopsis ?? "")));
 
   for (const document of documents) {
     for (const token of document) {
@@ -140,7 +140,7 @@ export const franchiseKey = (anime: Anime) => {
 
 const isLikelyContinuation = (anime: Anime) => {
   const title = normalize(titleText(anime));
-  const synopsis = normalize(anime.synopsis);
+  const synopsis = normalize(anime.synopsis ?? "");
   return (
     /\b(?:season|part)\s*\d+\b/.test(title) ||
     /\b\d+(?:nd|rd|th)\s+season\b/.test(title) ||
@@ -154,14 +154,14 @@ const metadataSimilarity = (left: Anime, right: Anime) => {
   let score = 0;
   if (left.format === right.format) score += 0.35;
   if (left.year && right.year) score += Math.max(0, 0.25 - Math.abs(left.year - right.year) / 40);
-  if (setSimilarity(left.studios, right.studios) > 0) score += 0.25;
-  if (setSimilarity(left.demographics, right.demographics) > 0) score += 0.15;
+  if (setSimilarity(left.studios ?? [], right.studios ?? []) > 0) score += 0.25;
+  if (setSimilarity(left.demographics ?? [], right.demographics ?? []) > 0) score += 0.15;
   return Math.min(score, 1);
 };
 
 const buildBreakdown = (target: Anime, candidate: Anime, storySimilarity: number): SimilarityBreakdown => ({
-  genres: setSimilarity(target.genres, candidate.genres),
-  themes: setSimilarity([...target.themes, ...target.demographics], [...candidate.themes, ...candidate.demographics]),
+  genres: setSimilarity(target.genres ?? [], candidate.genres ?? []),
+  themes: setSimilarity([...(target.themes ?? []), ...(target.demographics ?? [])], [...(candidate.themes ?? []), ...(candidate.demographics ?? [])]),
   synopsis: storySimilarity,
   title: textSimilarity(titleText(target), titleText(candidate)),
   metadata: metadataSimilarity(target, candidate),
@@ -175,11 +175,15 @@ const weightedScore = (breakdown: SimilarityBreakdown) =>
   breakdown.title * 0.05;
 
 const clusterFor = (anime: Anime, target: Anime) => {
-  const shared = anime.genres.filter((genre) => target.genres.includes(genre));
+  const animeGenres = anime.genres ?? [];
+  const targetGenres = target.genres ?? [];
+  const animeThemes = anime.themes ?? [];
+  const targetThemes = target.themes ?? [];
+  const shared = animeGenres.filter((genre) => targetGenres.includes(genre));
   if (shared.includes("Action") && shared.includes("Fantasy")) return "Battle fantasy";
-  if (shared.includes("Drama") && (anime.genres.includes("Romance") || target.genres.includes("Romance"))) return "Emotional drama";
-  if (shared.includes("Sci-Fi") || anime.themes.includes("Mecha") || target.themes.includes("Mecha")) return "Speculative systems";
-  if (anime.themes.includes("School") || target.themes.includes("School")) return "School energy";
+  if (shared.includes("Drama") && (animeGenres.includes("Romance") || targetGenres.includes("Romance"))) return "Emotional drama";
+  if (shared.includes("Sci-Fi") || animeThemes.includes("Mecha") || targetThemes.includes("Mecha")) return "Speculative systems";
+  if (animeThemes.includes("School") || targetThemes.includes("School")) return "School energy";
   if (shared.includes("Comedy")) return "Comedic pace";
   if (shared.length) return `${shared[0]} neighbors`;
   return "Nearby mood";
@@ -187,15 +191,18 @@ const clusterFor = (anime: Anime, target: Anime) => {
 
 const reasonFor = (target: Anime, candidate: Anime, breakdown: SimilarityBreakdown) => {
   const reasons: string[] = [];
-  const sharedGenres = candidate.genres.filter((genre) => target.genres.includes(genre));
-  const sharedThemes = [...candidate.themes, ...candidate.demographics].filter((theme) =>
-    [...target.themes, ...target.demographics].includes(theme),
+  const targetStudios = target.studios ?? [];
+  const sharedGenres = (candidate.genres ?? []).filter((genre) => (target.genres ?? []).includes(genre));
+  const sharedThemes = [...(candidate.themes ?? []), ...(candidate.demographics ?? [])].filter((theme) =>
+    [...(target.themes ?? []), ...(target.demographics ?? [])].includes(theme),
   );
 
   if (sharedGenres.length) reasons.push(`Shares ${sharedGenres.slice(0, 3).join(", ")}`);
   if (sharedThemes.length) reasons.push(`Matches ${sharedThemes.slice(0, 2).join(", ")}`);
   if (breakdown.synopsis > 0.12) reasons.push("Synopsis language overlaps");
-  if (candidate.studios.some((studio) => target.studios.includes(studio))) reasons.push(`Same studio: ${candidate.studios.find((studio) => target.studios.includes(studio))}`);
+  if ((candidate.studios ?? []).some((studio) => targetStudios.includes(studio))) {
+    reasons.push(`Same studio: ${(candidate.studios ?? []).find((studio) => targetStudios.includes(studio))}`);
+  }
   if (candidate.format === target.format) reasons.push(`Same format: ${candidate.format}`);
 
   return reasons.slice(0, 3);
@@ -205,14 +212,14 @@ export const recommendAnime = (target: Anime, catalog: Anime[], count: number): 
   const targetFranchise = franchiseKey(target);
   const seenFranchises = new Set<string>();
   const idf = buildIdf(catalog);
-  const targetStoryVector = vectorizeText(target.synopsis, idf);
+  const targetStoryVector = vectorizeText(target.synopsis ?? "", idf);
 
   return catalog
     .filter((anime) => anime.id !== target.id && anime.malId !== target.malId)
     .filter((anime) => !isLikelyContinuation(anime))
     .filter((anime) => franchiseKey(anime) !== targetFranchise)
     .map((anime) => {
-      const storySimilarity = cosineSimilarity(targetStoryVector, vectorizeText(anime.synopsis, idf));
+      const storySimilarity = cosineSimilarity(targetStoryVector, vectorizeText(anime.synopsis ?? "", idf));
       const breakdown = buildBreakdown(target, anime, storySimilarity);
       const score = weightedScore(breakdown);
       return {

@@ -20,6 +20,26 @@ const normalize = (value: string) =>
 
 export const getAnimeDisplayTitle = (anime: Anime) => anime.title.english || anime.title.romaji || anime.title.native || "Untitled anime";
 
+export const getAnimeById = (catalog: Anime[], id: number) => catalog.find((anime) => anime.id === id) ?? null;
+
+export const getAnimeSubtitle = (anime: Anime) => {
+  if (anime.title.english && anime.title.english !== anime.title.romaji) return anime.title.english;
+  if (anime.title.native && anime.title.native !== anime.title.romaji) return anime.title.native;
+  return "";
+};
+
+const formatNumber = (value: number | undefined, prefix = "") => (typeof value === "number" ? `${prefix}${value.toLocaleString()}` : "Unknown");
+
+export const formatAnimeMetadata = (anime: Anime) => ({
+  format: anime.format || "Unknown",
+  year: anime.year ? String(anime.year) : "Unknown",
+  episodes: anime.episodes ? `${anime.episodes.toLocaleString()} eps` : "Unknown",
+  score: typeof anime.score === "number" ? anime.score.toFixed(2) : "Unknown",
+  rank: formatNumber(anime.rank, "#"),
+  popularity: formatNumber(anime.popularity, "#"),
+  studios: anime.studios?.length ? anime.studios.join(", ") : "Unknown",
+});
+
 const uniqueSorted = (values: string[]) => [...new Set(values.filter(Boolean))].sort((left, right) => left.localeCompare(right));
 
 export const getUniqueGenres = (catalog: Anime[]) => uniqueSorted(catalog.flatMap((anime) => anime.genres ?? []));
