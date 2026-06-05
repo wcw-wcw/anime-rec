@@ -841,7 +841,7 @@ export function App() {
               <label>
                 Sort
                 <select value={recommendationSort} onChange={(event) => setRecommendationSort(event.target.value as RecommendationSortMode)}>
-                  <option value="similarity_desc">Match %</option>
+                  <option value="similarity_desc">Similarity</option>
                   <option value="year_desc">Age</option>
                   <option value="score_desc">Score</option>
                 </select>
@@ -899,7 +899,7 @@ export function App() {
                               <div className="card-topline">
                                 <SourcePill source={rec.anime.source} />
                                 <span className={`match-pill match-${strengthTone(matchStrength(rec.score, topScore))}`}>
-                                  {formatSimilarityScore(rec.score)} similar
+                                  {matchStrength(rec.score, topScore)} match
                                 </span>
                               </div>
                               <h4>{titleFor(rec.anime)}</h4>

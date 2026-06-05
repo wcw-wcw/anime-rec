@@ -283,8 +283,7 @@ a {
 }
 
 .filter-popover label,
-.filter-field-pair label,
-.recommendation-toolbar label {
+.filter-field-pair label {
   display: flex;
   flex-direction: column;
   gap: 6px;
@@ -549,7 +548,20 @@ a {
 }
 
 .recommendation-toolbar label {
-  width: min(210px, 100%);
+  display: inline-flex;
+  flex-direction: row;
+  align-items: center;
+  gap: 10px;
+  width: auto;
+  color: #465461;
+  font-size: 0.74rem;
+  font-weight: 900;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+
+.recommendation-toolbar select {
+  width: 190px;
 }
 
 .recommendation-empty {
@@ -1443,7 +1455,12 @@ a {
   }
 
   .recommendation-toolbar label {
+    justify-content: space-between;
     width: 100%;
+  }
+
+  .recommendation-toolbar select {
+    width: min(210px, 100%);
   }
 
   .anime-card {
