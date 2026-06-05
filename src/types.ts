@@ -32,6 +32,36 @@ export interface SimilarityBreakdown {
   synopsis: number;
   title: number;
   metadata: number;
+  demographics: number;
+  studios: number;
+  format: number;
+  year: number;
+  score: number;
+  popularity: number;
+}
+
+export interface RecommendationFactor {
+  key: string;
+  label: string;
+  value: number;
+  detail?: string;
+}
+
+export interface RecommendationExplanation {
+  totalScore: number;
+  summary: string;
+  factorBreakdown: RecommendationFactor[];
+  matchedGenres: string[];
+  matchedThemes: string[];
+  matchedDemographics: string[];
+  matchedStudios: string[];
+  formatMatch: boolean;
+  yearCloseness: number;
+  scoreCloseness: number;
+  popularityCloseness: number;
+  synopsisSimilarity: number;
+  titleSimilarity: number;
+  topReasons: string[];
 }
 
 export interface Recommendation {
@@ -40,6 +70,19 @@ export interface Recommendation {
   cluster: string;
   reasons: string[];
   breakdown: SimilarityBreakdown;
+  explanation: RecommendationExplanation;
+}
+
+export type RecommendationSortMode = "similarity_desc" | "score_desc" | "popularity_asc" | "year_desc" | "title_asc";
+
+export interface RecommendationFilters {
+  format?: string;
+  minYear?: number;
+  maxYear?: number;
+  minScore?: number;
+  maxPopularity?: number;
+  includeGenres?: string[];
+  excludeGenres?: string[];
 }
 
 export interface SearchMatch {

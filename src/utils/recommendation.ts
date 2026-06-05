@@ -1,4 +1,13 @@
-import type { Anime, Recommendation, SearchMatch, SimilarityBreakdown } from "../types";
+import type {
+  Anime,
+  Recommendation,
+  RecommendationExplanation,
+  RecommendationFactor,
+  RecommendationFilters,
+  RecommendationSortMode,
+  SearchMatch,
+  SimilarityBreakdown,
+} from "../types";
 
 const STOP_WORDS = new Set([
   "a",
@@ -54,6 +63,21 @@ const setSimilarity = (left: string[], right: string[]) => {
 };
 
 const textSimilarity = (left: string, right: string) => setSimilarity(tokenize(left), tokenize(right));
+
+const clamp01 = (value: number) => (Number.isFinite(value) ? Math.min(1, Math.max(0, value)) : 0);
+
+const sharedValues = (left: string[] | undefined, right: string[] | undefined) => {
+  const targetValues = new Set((left ?? []).map(normalize));
+  const matches: string[] = [];
+
+  for (const value of right ?? []) {
+    if (value && targetValues.has(normalize(value)) && !matches.some((match) => normalize(match) === normalize(value))) {
+      matches.push(value);
+    }
+  }
+
+  return matches;
+};
 
 type Vector = Map<string, number>;
 
@@ -150,6 +174,16 @@ const isLikelyContinuation = (anime: Anime) => {
   );
 };
 
+const closeness = (left: number | undefined, right: number | undefined, range: number) => {
+  if (typeof left !== "number" || typeof right !== "number" || range <= 0) return 0;
+  return clamp01(1 - Math.abs(left - right) / range);
+};
+
+const inverseRankCloseness = (left: number | undefined, right: number | undefined, range: number) => {
+  if (typeof left !== "number" || typeof right !== "number" || range <= 0) return 0;
+  return clamp01(1 - Math.abs(left - right) / range);
+};
+
 const metadataSimilarity = (left: Anime, right: Anime) => {
   let score = 0;
   if (left.format === right.format) score += 0.35;
@@ -162,9 +196,15 @@ const metadataSimilarity = (left: Anime, right: Anime) => {
 const buildBreakdown = (target: Anime, candidate: Anime, storySimilarity: number): SimilarityBreakdown => ({
   genres: setSimilarity(target.genres ?? [], candidate.genres ?? []),
   themes: setSimilarity([...(target.themes ?? []), ...(target.demographics ?? [])], [...(candidate.themes ?? []), ...(candidate.demographics ?? [])]),
-  synopsis: storySimilarity,
-  title: textSimilarity(titleText(target), titleText(candidate)),
+  synopsis: clamp01(storySimilarity),
+  title: clamp01(textSimilarity(titleText(target), titleText(candidate))),
   metadata: metadataSimilarity(target, candidate),
+  demographics: setSimilarity(target.demographics ?? [], candidate.demographics ?? []),
+  studios: setSimilarity(target.studios ?? [], candidate.studios ?? []),
+  format: target.format && candidate.format && target.format === candidate.format ? 1 : 0,
+  year: closeness(target.year, candidate.year, 10),
+  score: closeness(target.score, candidate.score, 2),
+  popularity: inverseRankCloseness(target.popularity ?? target.rank, candidate.popularity ?? candidate.rank, 1200),
 });
 
 const weightedScore = (breakdown: SimilarityBreakdown) =>
@@ -189,23 +229,133 @@ const clusterFor = (anime: Anime, target: Anime) => {
   return "Nearby mood";
 };
 
-const reasonFor = (target: Anime, candidate: Anime, breakdown: SimilarityBreakdown) => {
-  const reasons: string[] = [];
-  const targetStudios = target.studios ?? [];
-  const sharedGenres = (candidate.genres ?? []).filter((genre) => (target.genres ?? []).includes(genre));
-  const sharedThemes = [...(candidate.themes ?? []), ...(candidate.demographics ?? [])].filter((theme) =>
-    [...(target.themes ?? []), ...(target.demographics ?? [])].includes(theme),
-  );
+const pluralize = (count: number, singular: string, plural = `${singular}s`) => (count === 1 ? singular : plural);
 
-  if (sharedGenres.length) reasons.push(`Shares ${sharedGenres.slice(0, 3).join(", ")}`);
-  if (sharedThemes.length) reasons.push(`Matches ${sharedThemes.slice(0, 2).join(", ")}`);
-  if (breakdown.synopsis > 0.12) reasons.push("Synopsis language overlaps");
-  if ((candidate.studios ?? []).some((studio) => targetStudios.includes(studio))) {
-    reasons.push(`Same studio: ${(candidate.studios ?? []).find((studio) => targetStudios.includes(studio))}`);
-  }
-  if (candidate.format === target.format) reasons.push(`Same format: ${candidate.format}`);
+const joinShortList = (values: string[], max = 3) => {
+  const shown = values.slice(0, max);
+  const extra = values.length - shown.length;
+  return extra > 0 ? `${shown.join(", ")} +${extra}` : shown.join(", ");
+};
 
-  return reasons.slice(0, 3);
+export const formatSimilarityScore = (score: number) => `${Math.round(clamp01(score) * 100)}%`;
+
+const factorDetail = (items: string[], emptyDetail = "") => (items.length ? joinShortList(items) : emptyDetail);
+
+export const getTopRecommendationReasons = (explanation: RecommendationExplanation) => {
+  const specific = explanation.factorBreakdown
+    .filter((factor) => factor.value > 0 && factor.detail)
+    .sort((left, right) => right.value - left.value)
+    .map((factor) => `${factor.label}: ${factor.detail}`);
+
+  if (!specific.length) return ["Recommended based on overall metadata similarity."];
+  return specific.slice(0, 3);
+};
+
+export const buildRecommendationExplanation = (
+  target: Anime,
+  candidate: Anime,
+  breakdown: SimilarityBreakdown,
+  totalScore: number,
+): RecommendationExplanation => {
+  const matchedGenres = sharedValues(target.genres, candidate.genres);
+  const matchedThemes = sharedValues(target.themes, candidate.themes);
+  const matchedDemographics = sharedValues(target.demographics, candidate.demographics);
+  const matchedStudios = sharedValues(target.studios, candidate.studios);
+  const formatMatch = Boolean(target.format && candidate.format && target.format === candidate.format);
+  const yearGap =
+    typeof target.year === "number" && typeof candidate.year === "number" ? Math.abs(target.year - candidate.year) : undefined;
+  const scoreGap =
+    typeof target.score === "number" && typeof candidate.score === "number" ? Math.abs(target.score - candidate.score) : undefined;
+
+  const factorBreakdown: RecommendationFactor[] = [
+    {
+      key: "genres",
+      label: "Genres",
+      value: breakdown.genres,
+      detail: factorDetail(matchedGenres),
+    },
+    {
+      key: "themes",
+      label: "Themes",
+      value: setSimilarity(target.themes ?? [], candidate.themes ?? []),
+      detail: factorDetail(matchedThemes),
+    },
+    {
+      key: "demographics",
+      label: "Demographic",
+      value: breakdown.demographics,
+      detail: factorDetail(matchedDemographics),
+    },
+    {
+      key: "synopsis",
+      label: "Synopsis",
+      value: breakdown.synopsis,
+      detail: breakdown.synopsis > 0.08 ? "story text overlaps" : "",
+    },
+    {
+      key: "format",
+      label: "Format",
+      value: breakdown.format,
+      detail: formatMatch ? `same ${candidate.format} format` : "",
+    },
+    {
+      key: "studio",
+      label: "Studio",
+      value: breakdown.studios,
+      detail: factorDetail(matchedStudios),
+    },
+    {
+      key: "year",
+      label: "Year",
+      value: breakdown.year,
+      detail: yearGap !== undefined && breakdown.year >= 0.5 ? `${yearGap} ${pluralize(yearGap, "year")} apart` : "",
+    },
+    {
+      key: "score",
+      label: "Popularity/score metadata",
+      value: Math.max(breakdown.score, breakdown.popularity),
+      detail: scoreGap !== undefined && breakdown.score >= 0.5 ? `MAL scores within ${scoreGap.toFixed(1)}` : "",
+    },
+    {
+      key: "title",
+      label: "Title",
+      value: breakdown.title,
+      detail: breakdown.title > 0.12 ? "title wording overlaps" : "",
+    },
+  ].map((factor) => ({ ...factor, value: clamp01(factor.value) }));
+
+  const explanationBase: RecommendationExplanation = {
+    totalScore,
+    summary: "Recommended based on overall metadata similarity.",
+    factorBreakdown,
+    matchedGenres,
+    matchedThemes,
+    matchedDemographics,
+    matchedStudios,
+    formatMatch,
+    yearCloseness: breakdown.year,
+    scoreCloseness: breakdown.score,
+    popularityCloseness: breakdown.popularity,
+    synopsisSimilarity: breakdown.synopsis,
+    titleSimilarity: breakdown.title,
+    topReasons: [],
+  };
+
+  const topReasons = getTopRecommendationReasons(explanationBase);
+  const primaryReasons = [
+    matchedGenres.length ? `${matchedGenres.length} shared ${pluralize(matchedGenres.length, "genre")}` : "",
+    matchedThemes.length ? `${matchedThemes.length} shared ${pluralize(matchedThemes.length, "theme")}` : "",
+    matchedDemographics.length ? `same ${joinShortList(matchedDemographics, 1)} audience tag` : "",
+    matchedStudios.length ? `same studio` : "",
+    formatMatch ? `same ${candidate.format} format` : "",
+    breakdown.synopsis > 0.12 ? "similar synopsis wording" : "",
+  ].filter(Boolean);
+
+  return {
+    ...explanationBase,
+    summary: primaryReasons.length ? `Matches on ${primaryReasons.slice(0, 3).join(", ")}.` : explanationBase.summary,
+    topReasons,
+  };
 };
 
 export const recommendAnime = (target: Anime, catalog: Anime[], count: number): Recommendation[] => {
@@ -222,12 +372,14 @@ export const recommendAnime = (target: Anime, catalog: Anime[], count: number): 
       const storySimilarity = cosineSimilarity(targetStoryVector, vectorizeText(anime.synopsis ?? "", idf));
       const breakdown = buildBreakdown(target, anime, storySimilarity);
       const score = weightedScore(breakdown);
+      const explanation = buildRecommendationExplanation(target, anime, breakdown, score);
       return {
         anime,
         score,
         cluster: clusterFor(anime, target),
-        reasons: reasonFor(target, anime, breakdown),
+        reasons: explanation.topReasons,
         breakdown,
+        explanation,
       };
     })
     .sort((left, right) => right.score - left.score)
@@ -238,6 +390,95 @@ export const recommendAnime = (target: Anime, catalog: Anime[], count: number): 
       return true;
     })
     .slice(0, count);
+};
+
+const cleanNumber = (value: number | undefined) => (typeof value === "number" && Number.isFinite(value) ? value : undefined);
+
+const normalizedGenreSet = (genres: string[] | undefined) => new Set((genres ?? []).map(normalize));
+
+export const clearRecommendationFilters = (): RecommendationFilters => ({
+  format: "",
+  minYear: undefined,
+  maxYear: undefined,
+  minScore: undefined,
+  maxPopularity: undefined,
+  includeGenres: [],
+  excludeGenres: [],
+});
+
+export const hasActiveRecommendationFilters = (filters: RecommendationFilters) =>
+  Boolean(
+    filters.format ||
+      cleanNumber(filters.minYear) !== undefined ||
+      cleanNumber(filters.maxYear) !== undefined ||
+      cleanNumber(filters.minScore) !== undefined ||
+      cleanNumber(filters.maxPopularity) !== undefined ||
+      (filters.includeGenres?.length ?? 0) > 0 ||
+      (filters.excludeGenres?.length ?? 0) > 0,
+  );
+
+export const getAvailableRecommendationGenres = (results: Recommendation[]) =>
+  [...new Set(results.flatMap((result) => result.anime.genres ?? []).filter(Boolean))].sort((left, right) => left.localeCompare(right));
+
+export const getAvailableRecommendationFormats = (results: Recommendation[]) =>
+  [...new Set(results.map((result) => result.anime.format).filter(Boolean))].sort((left, right) => left.localeCompare(right));
+
+export const applyRecommendationFilters = (results: Recommendation[], filters: RecommendationFilters) => {
+  const minYear = cleanNumber(filters.minYear);
+  const maxYear = cleanNumber(filters.maxYear);
+  const startYear = minYear !== undefined && maxYear !== undefined ? Math.min(minYear, maxYear) : minYear;
+  const endYear = minYear !== undefined && maxYear !== undefined ? Math.max(minYear, maxYear) : maxYear;
+  const minScore = cleanNumber(filters.minScore);
+  const maxPopularity = cleanNumber(filters.maxPopularity);
+  const includeGenres = (filters.includeGenres ?? []).map(normalize).filter(Boolean);
+  const excludeGenres = (filters.excludeGenres ?? []).map(normalize).filter(Boolean);
+
+  return results.filter((result) => {
+    const { anime } = result;
+    const year = cleanNumber(anime.year);
+    const score = cleanNumber(anime.score);
+    const popularity = cleanNumber(anime.popularity);
+    const genres = normalizedGenreSet(anime.genres);
+
+    return (
+      (!filters.format || anime.format === filters.format) &&
+      (startYear === undefined || (year !== undefined && year >= startYear)) &&
+      (endYear === undefined || (year !== undefined && year <= endYear)) &&
+      (minScore === undefined || (score !== undefined && score >= minScore)) &&
+      (maxPopularity === undefined || (popularity !== undefined && popularity <= maxPopularity)) &&
+      includeGenres.every((genre) => genres.has(genre)) &&
+      excludeGenres.every((genre) => !genres.has(genre))
+    );
+  });
+};
+
+const missingHigh = Number.POSITIVE_INFINITY;
+const missingLow = Number.NEGATIVE_INFINITY;
+
+export const sortRecommendationResults = (results: Recommendation[], sortMode: RecommendationSortMode) => {
+  const sorted = [...results];
+
+  sorted.sort((left, right) => {
+    switch (sortMode) {
+      case "score_desc":
+        return (right.anime.score ?? missingLow) - (left.anime.score ?? missingLow) || right.score - left.score;
+      case "popularity_asc":
+        return (
+          (left.anime.popularity ?? missingHigh) - (right.anime.popularity ?? missingHigh) ||
+          (left.anime.rank ?? missingHigh) - (right.anime.rank ?? missingHigh) ||
+          right.score - left.score
+        );
+      case "year_desc":
+        return (right.anime.year ?? missingLow) - (left.anime.year ?? missingLow) || right.score - left.score;
+      case "title_asc":
+        return titleForKey(left.anime).localeCompare(titleForKey(right.anime)) || right.score - left.score;
+      case "similarity_desc":
+      default:
+        return right.score - left.score || titleForKey(left.anime).localeCompare(titleForKey(right.anime));
+    }
+  });
+
+  return sorted;
 };
 
 export const findAnime = (query: string, catalog: Anime[]): SearchMatch[] => {
@@ -265,7 +506,7 @@ export const extractMalId = (value: string) => {
   return match ? Number(match[1]) : undefined;
 };
 
-export const percent = (value: number) => Math.round(value * 100);
+export const percent = (value: number) => Math.round(clamp01(value) * 100);
 
 export const tenPoint = (value: number) => Math.round(value * 10);
 

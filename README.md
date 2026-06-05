@@ -24,6 +24,18 @@ Catalog cards, recommendation cards, and the currently selected source anime can
 
 The detail view uses the currently loaded local/API catalog and the existing metadata recommender to show similar anime. It can also start a fresh recommendation run from the displayed anime without introducing separate routes or authentication.
 
+## Explainable recommendations
+
+Recommendations are currently rule/metadata-based and deterministic. The app ranks titles with shared genres, themes, demographics, synopsis text similarity, title overlap, format, year, studio, and score/popularity metadata.
+
+Recommendation cards show a similarity score, a short "Why this matches" summary, top match reasons, and factor bars for the strongest scoring signals. These explanations are intended to describe the current metadata scorer honestly; vector or embedding similarity is a future enhancement, not part of the current recommender.
+
+## Recommendation filters
+
+The Recommend view includes a "Refine recommendations" panel after the base recommendation list is generated. Users can narrow the explainable metadata-based results by format, score, year range, popularity, included genres, and excluded genres, then sort by similarity, score, popularity, newest year, or title.
+
+These controls filter and sort the current deterministic recommendation results; they do not change the underlying scoring weights. Vector similarity search is planned as the next major recommendation-quality upgrade.
+
 ## Run it
 
 ```bash

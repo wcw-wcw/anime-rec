@@ -2,7 +2,7 @@ import { FormEvent, useEffect, useMemo, useState } from "react";
 import { ArrowLeft, Calendar, ExternalLink, Gauge, ImageOff, Info, Library, LinkIcon, Search, SlidersHorizontal, Sparkles, Star } from "lucide-react";
 import { localCatalog } from "./data/catalog";
 import { CatalogApiProvider, JikanProvider, LocalCatalogProvider } from "./services/animeProvider";
-import type { Anime, Recommendation } from "./types";
+import type { Anime, Recommendation, RecommendationFilters, RecommendationSortMode } from "./types";
 import {
   filterAnimeCatalog,
   formatAnimeMetadata,
@@ -16,7 +16,21 @@ import {
   type CatalogFilters,
   type CatalogSortMode,
 } from "./utils/catalog";
-import { extractMalId, factorPercent, findAnime, matchStrength, recommendAnime, relativePercent, strengthTone } from "./utils/recommendation";
+import {
+  applyRecommendationFilters,
+  clearRecommendationFilters,
+  extractMalId,
+  factorPercent,
+  findAnime,
+  formatSimilarityScore,
+  getAvailableRecommendationFormats,
+  getAvailableRecommendationGenres,
+  hasActiveRecommendationFilters,
+  matchStrength,
+  recommendAnime,
+  sortRecommendationResults,
+  strengthTone,
+} from "./utils/recommendation";
 
 const localProvider = new LocalCatalogProvider();
 const apiProvider = new CatalogApiProvider();
@@ -36,6 +50,8 @@ const defaultCatalogFilters: CatalogFilters = {
   minScore: 0,
 };
 
+const defaultRecommendationFilters = clearRecommendationFilters();
+
 const SourcePill = ({ source }: { source: Anime["source"] }) => (
   <span className={`source source-${source}`}>{source === "mal" ? "MAL" : source === "jikan" ? "Jikan" : "Local"}</span>
 );
@@ -49,6 +65,25 @@ const FactorBar = ({ label, value }: { label: string; value: number }) => (
     <strong>{factorPercent(value)}</strong>
   </div>
 );
+
+const RecommendationReasons = ({ rec }: { rec: Recommendation }) => {
+  const reasons = rec.explanation.topReasons.length ? rec.explanation.topReasons : rec.reasons;
+
+  return (
+    <div className="recommendation-explanation">
+      <div className="explanation-heading">
+        <span>Why this matches</span>
+        <strong>{formatSimilarityScore(rec.explanation.totalScore)} similar</strong>
+      </div>
+      <p>{rec.explanation.summary}</p>
+      <div className="reason-list">
+        {reasons.slice(0, 3).map((reason) => (
+          <span key={reason}>{reason}</span>
+        ))}
+      </div>
+    </div>
+  );
+};
 
 const EmptyState = () => (
   <section className="empty-state">
@@ -98,6 +133,8 @@ export function App() {
   const [catalogLoadState, setCatalogLoadState] = useState<"loading" | "ready" | "error">(localCatalog.length ? "ready" : "loading");
   const [catalogFilters, setCatalogFilters] = useState<CatalogFilters>(defaultCatalogFilters);
   const [catalogSort, setCatalogSort] = useState<CatalogSortMode>("popularity");
+  const [recommendationFilters, setRecommendationFilters] = useState<RecommendationFilters>(defaultRecommendationFilters);
+  const [recommendationSort, setRecommendationSort] = useState<RecommendationSortMode>("similarity_desc");
   const [selected, setSelected] = useState<Anime | null>(defaultAnime);
   const [recommendations, setRecommendations] = useState<Recommendation[]>(() => (defaultAnime ? recommendAnime(defaultAnime, localCatalog, 8) : []));
   const [selectedDetailAnime, setSelectedDetailAnime] = useState<Anime | null>(null);
@@ -139,6 +176,22 @@ export function App() {
   const formats = useMemo(() => getUniqueFormats(catalog), [catalog]);
   const years = useMemo(() => getUniqueYears(catalog), [catalog]);
   const catalogResults = useMemo(() => sortAnimeCatalog(filterAnimeCatalog(catalog, catalogFilters), catalogSort), [catalog, catalogFilters, catalogSort]);
+  const recommendationGenres = useMemo(() => getAvailableRecommendationGenres(recommendations), [recommendations]);
+  const recommendationFormats = useMemo(() => getAvailableRecommendationFormats(recommendations), [recommendations]);
+  const filteredRecommendations = useMemo(
+    () => sortRecommendationResults(applyRecommendationFilters(recommendations, recommendationFilters), recommendationSort),
+    [recommendations, recommendationFilters, recommendationSort],
+  );
+  const activeRecommendationFilterCount = useMemo(() => {
+    const scalarFilters = [
+      recommendationFilters.format,
+      recommendationFilters.minYear,
+      recommendationFilters.maxYear,
+      recommendationFilters.minScore,
+      recommendationFilters.maxPopularity,
+    ].filter((value) => value !== undefined && value !== "").length;
+    return scalarFilters + (recommendationFilters.includeGenres?.length ?? 0) + (recommendationFilters.excludeGenres?.length ?? 0);
+  }, [recommendationFilters]);
   const detailAnime = useMemo(() => {
     if (!selectedDetailAnime) return null;
     return getAnimeById(catalog, selectedDetailAnime.id) ?? selectedDetailAnime;
@@ -149,14 +202,12 @@ export function App() {
     return recommendAnime(detailAnime, comparisonCatalog, 6);
   }, [catalog, detailAnime]);
   const grouped = useMemo(() => {
-    return recommendations.reduce<Record<string, Recommendation[]>>((acc, rec) => {
+    return filteredRecommendations.reduce<Record<string, Recommendation[]>>((acc, rec) => {
       acc[rec.cluster] = [...(acc[rec.cluster] ?? []), rec];
       return acc;
     }, {});
-  }, [recommendations]);
-  const topScore = recommendations[0]?.score ?? 0;
-  const topStoryScore = Math.max(0, ...recommendations.map((rec) => rec.breakdown.synopsis));
-
+  }, [filteredRecommendations]);
+  const topScore = filteredRecommendations.reduce((max, rec) => Math.max(max, rec.score), 0);
   const runRecommendation = async (event?: FormEvent) => {
     event?.preventDefault();
     setLookupState("loading");
@@ -253,6 +304,28 @@ export function App() {
 
   const updateCatalogFilter = <Key extends keyof CatalogFilters>(key: Key, value: CatalogFilters[Key]) => {
     setCatalogFilters((current) => ({ ...current, [key]: value }));
+  };
+
+  const updateRecommendationFilter = <Key extends keyof RecommendationFilters>(key: Key, value: RecommendationFilters[Key]) => {
+    setRecommendationFilters((current) => ({ ...current, [key]: value }));
+  };
+
+  const updateRecommendationNumberFilter = (key: "minYear" | "maxYear" | "minScore" | "maxPopularity", value: string) => {
+    const parsed = value === "" ? undefined : Number(value);
+    updateRecommendationFilter(key, Number.isFinite(parsed) ? parsed : undefined);
+  };
+
+  const toggleRecommendationGenre = (key: "includeGenres" | "excludeGenres", genre: string) => {
+    setRecommendationFilters((current) => {
+      const currentValues = current[key] ?? [];
+      const nextValues = currentValues.includes(genre) ? currentValues.filter((value) => value !== genre) : [...currentValues, genre];
+      const opposingKey = key === "includeGenres" ? "excludeGenres" : "includeGenres";
+      return {
+        ...current,
+        [key]: nextValues,
+        [opposingKey]: (current[opposingKey] ?? []).filter((value) => value !== genre),
+      };
+    });
   };
 
   const recommendFromCatalog = (anime: Anime) => {
@@ -459,13 +532,13 @@ export function App() {
                         <div className="card-topline">
                           <SourcePill source={rec.anime.source} />
                           <span className={`match-pill match-${strengthTone(matchStrength(rec.score, similarAnime[0]?.score ?? 0))}`}>
-                            {matchStrength(rec.score, similarAnime[0]?.score ?? 0)} match
+                            {formatSimilarityScore(rec.score)}
                           </span>
                         </div>
                       </div>
                       <div className="similar-card-body">
                         <h3>{titleFor(rec.anime)}</h3>
-                        <p>{rec.reasons.length ? rec.reasons.join(". ") : rec.anime.synopsis || "Similar metadata and tags."}</p>
+                        <p>{rec.explanation.summary || rec.reasons[0] || "Recommended based on overall metadata similarity."}</p>
                         <div className="detail-card-actions">
                           <button type="button" className="secondary-button" onClick={() => openAnimeDetail(rec.anime)}>
                             <Info size={15} />
@@ -665,109 +738,256 @@ export function App() {
                 <span className="eyebrow">Similarity graph</span>
                 <h2>Recommended neighbors</h2>
               </div>
-              <span className="catalog-count">{catalog.length} stored titles</span>
+              <span className="catalog-count">Showing {filteredRecommendations.length} of {recommendations.length} recommendations</span>
             </div>
 
             <div className="score-explainer">
               <div>
                 <h3>How matches are scored</h3>
                 <p>
-                  Ranking uses MAL genres, any available theme/demographic tags, metadata, title wording, and a local TF-IDF vector comparison of MAL synopses. Story bars are scaled against the strongest story match in the current results, so they show useful spread without pretending to be neural semantic embeddings.
+                  Ranking uses MAL genres, available theme and demographic tags, metadata, title wording, and a local TF-IDF comparison of MAL synopses. These explanations show the strongest deterministic metadata reasons for each match; they are not AI or embedding judgments.
                 </p>
               </div>
               <div className="weight-list" aria-label="Similarity factor weights">
                 <span><strong>34%</strong> genres</span>
-                <span><strong>24%</strong> extra tags</span>
-                <span><strong>23%</strong> synopsis text</span>
+                <span><strong>24%</strong> themes and audience</span>
+                <span><strong>23%</strong> synopsis similarity</span>
                 <span><strong>14%</strong> format/year/studio</span>
                 <span><strong>5%</strong> title</span>
               </div>
             </div>
 
-            <div className="graph-card">
-              <div className="graph-legend">
-                <span><i className="tone-strong" /> Very close</span>
-                <span><i className="tone-good" /> Good fit</span>
-                <span><i className="tone-moderate" /> Similar</span>
-                <span><i className="tone-light" /> Looser</span>
+            <section className="recommendation-refine" aria-label="Refine recommendations">
+              <div className="refine-heading">
+                <div>
+                  <span className="eyebrow"><SlidersHorizontal size={15} /> Refine recommendations</span>
+                  <p>Showing {filteredRecommendations.length} of {recommendations.length} recommendations</p>
+                </div>
+                <button
+                  type="button"
+                  className="secondary-button"
+                  onClick={() => setRecommendationFilters(clearRecommendationFilters())}
+                  disabled={!hasActiveRecommendationFilters(recommendationFilters)}
+                >
+                  Clear filters
+                </button>
               </div>
-              {recommendations.map((rec, index) => {
-                const strength = matchStrength(rec.score, topScore);
-                const tone = strengthTone(strength);
-                return (
-                  <div
-                    key={rec.anime.id}
-                    className={`graph-node graph-node-${tone}`}
-                    style={{
-                      left: `${12 + ((index * 19) % 76)}%`,
-                      top: `${22 + ((index * 31) % 54)}%`,
-                      width: `${48 + strength * 0.62}px`,
-                      height: `${48 + strength * 0.62}px`,
-                    }}
-                    title={`${titleFor(rec.anime)}: ${strength} match strength`}
-                  >
-                    {strength}
-                  </div>
-                );
-              })}
-              <div className="graph-caption">
-                Bigger circles are stronger matches. Color shows closeness tier. Position is a loose spread to make clusters readable, not a map coordinate.
-              </div>
-            </div>
 
-            <div className="cluster-stack">
-              {Object.entries(grouped).map(([cluster, items]) => (
-                <article key={cluster} className="cluster-group">
-                  <h3>{cluster}</h3>
-                  <div className="card-grid">
-                    {items.map((rec) => (
-                      <article key={rec.anime.id} className="anime-card">
-                        <AnimePoster anime={rec.anime} />
-                        <div className="card-body">
-                          <div className="card-topline">
-                            <SourcePill source={rec.anime.source} />
-                            <span className={`match-pill match-${strengthTone(matchStrength(rec.score, topScore))}`}>
-                              {matchStrength(rec.score, topScore)} match
-                            </span>
-                          </div>
-                          <h4>{titleFor(rec.anime)}</h4>
-                          <p>{rec.anime.synopsis}</p>
-                          <div className="factor-list">
-                            <FactorBar label="Genres" value={rec.breakdown.genres} />
-                            <FactorBar label="Tags" value={Math.max(rec.breakdown.themes, rec.breakdown.genres * 0.55)} />
-                            <FactorBar label="Story" value={relativePercent(rec.breakdown.synopsis, topStoryScore) / 100} />
-                            <FactorBar label="Meta" value={rec.breakdown.metadata} />
-                          </div>
-                          <div className="reason-list">
-                            {rec.reasons.map((reason) => (
-                              <span key={reason}>{reason}</span>
-                            ))}
-                          </div>
-                          <div className="detail-card-actions">
-                            <button type="button" className="secondary-button" onClick={() => openAnimeDetail(rec.anime)}>
-                              <Info size={15} />
-                              View details
-                            </button>
-                            <button type="button" className="primary-button" onClick={() => recommendFromAnime(rec.anime)}>
-                              <Sparkles size={15} />
-                              Recommend
-                            </button>
-                          </div>
-                          {rec.anime.malId && (
-                            <div className="card-footer">
-                              <a href={`https://myanimelist.net/anime/${rec.anime.malId}`} target="_blank" rel="noreferrer" className="mal-link">
-                                <LinkIcon size={14} /> MAL
-                              </a>
-                              <span className="mal-score">{rec.anime.score ? `${rec.anime.score.toFixed(2)} MAL` : "No MAL score"}</span>
-                            </div>
-                          )}
-                        </div>
-                      </article>
+              <div className="refine-controls">
+                <label>
+                  Format
+                  <select value={recommendationFilters.format ?? ""} onChange={(event) => updateRecommendationFilter("format", event.target.value)}>
+                    <option value="">All formats</option>
+                    {recommendationFormats.map((format) => (
+                      <option key={format} value={format}>{format}</option>
                     ))}
+                  </select>
+                </label>
+
+                <label>
+                  Min score
+                  <input
+                    type="number"
+                    min="0"
+                    max="10"
+                    step="0.1"
+                    placeholder="Any"
+                    value={recommendationFilters.minScore ?? ""}
+                    onChange={(event) => updateRecommendationNumberFilter("minScore", event.target.value)}
+                  />
+                </label>
+
+                <label>
+                  From year
+                  <input
+                    type="number"
+                    min="1900"
+                    max="2100"
+                    placeholder="Any"
+                    value={recommendationFilters.minYear ?? ""}
+                    onChange={(event) => updateRecommendationNumberFilter("minYear", event.target.value)}
+                  />
+                </label>
+
+                <label>
+                  To year
+                  <input
+                    type="number"
+                    min="1900"
+                    max="2100"
+                    placeholder="Any"
+                    value={recommendationFilters.maxYear ?? ""}
+                    onChange={(event) => updateRecommendationNumberFilter("maxYear", event.target.value)}
+                  />
+                </label>
+
+                <label>
+                  Max popularity
+                  <input
+                    type="number"
+                    min="1"
+                    step="1"
+                    placeholder="Any"
+                    value={recommendationFilters.maxPopularity ?? ""}
+                    onChange={(event) => updateRecommendationNumberFilter("maxPopularity", event.target.value)}
+                  />
+                </label>
+
+                <label>
+                  Sort
+                  <select value={recommendationSort} onChange={(event) => setRecommendationSort(event.target.value as RecommendationSortMode)}>
+                    <option value="similarity_desc">Similarity</option>
+                    <option value="score_desc">Score</option>
+                    <option value="popularity_asc">Popularity</option>
+                    <option value="year_desc">Newest</option>
+                    <option value="title_asc">Title</option>
+                  </select>
+                </label>
+              </div>
+
+              {activeRecommendationFilterCount > 0 && (
+                <div className="active-filter-row" aria-label="Active recommendation filters">
+                  <span>{activeRecommendationFilterCount} active</span>
+                  {recommendationFilters.format && <strong>{recommendationFilters.format}</strong>}
+                  {recommendationFilters.minScore !== undefined && <strong>{recommendationFilters.minScore.toFixed(1)}+ score</strong>}
+                  {recommendationFilters.minYear !== undefined && <strong>From {recommendationFilters.minYear}</strong>}
+                  {recommendationFilters.maxYear !== undefined && <strong>To {recommendationFilters.maxYear}</strong>}
+                  {recommendationFilters.maxPopularity !== undefined && <strong>Top {recommendationFilters.maxPopularity.toLocaleString()}</strong>}
+                  {(recommendationFilters.includeGenres ?? []).map((genre) => <strong key={`include-${genre}`}>Include {genre}</strong>)}
+                  {(recommendationFilters.excludeGenres ?? []).map((genre) => <strong key={`exclude-${genre}`}>Exclude {genre}</strong>)}
+                </div>
+              )}
+
+              {recommendationGenres.length > 0 && (
+                <div className="genre-filter-grid">
+                  <fieldset>
+                    <legend>Include genres</legend>
+                    <div>
+                      {recommendationGenres.map((genre) => (
+                        <label key={genre}>
+                          <input
+                            type="checkbox"
+                            checked={(recommendationFilters.includeGenres ?? []).includes(genre)}
+                            onChange={() => toggleRecommendationGenre("includeGenres", genre)}
+                          />
+                          <span>{genre}</span>
+                        </label>
+                      ))}
+                    </div>
+                  </fieldset>
+
+                  <fieldset>
+                    <legend>Exclude genres</legend>
+                    <div>
+                      {recommendationGenres.map((genre) => (
+                        <label key={genre}>
+                          <input
+                            type="checkbox"
+                            checked={(recommendationFilters.excludeGenres ?? []).includes(genre)}
+                            onChange={() => toggleRecommendationGenre("excludeGenres", genre)}
+                          />
+                          <span>{genre}</span>
+                        </label>
+                      ))}
+                    </div>
+                  </fieldset>
+                </div>
+              )}
+            </section>
+
+            {filteredRecommendations.length === 0 ? (
+              <section className="empty-state catalog-state recommendation-empty">
+                <Search size={24} />
+                <h2>No recommendations match these filters.</h2>
+                <p>Try lowering the score or clearing genre filters.</p>
+              </section>
+            ) : (
+              <>
+                <div className="graph-card">
+                  <div className="graph-legend">
+                    <span><i className="tone-strong" /> Very close</span>
+                    <span><i className="tone-good" /> Good fit</span>
+                    <span><i className="tone-moderate" /> Similar</span>
+                    <span><i className="tone-light" /> Looser</span>
                   </div>
-                </article>
-              ))}
-            </div>
+                  {filteredRecommendations.map((rec, index) => {
+                    const strength = matchStrength(rec.score, topScore);
+                    const tone = strengthTone(strength);
+                    return (
+                      <div
+                        key={rec.anime.id}
+                        className={`graph-node graph-node-${tone}`}
+                        style={{
+                          left: `${12 + ((index * 19) % 76)}%`,
+                          top: `${22 + ((index * 31) % 54)}%`,
+                          width: `${48 + strength * 0.62}px`,
+                          height: `${48 + strength * 0.62}px`,
+                        }}
+                        title={`${titleFor(rec.anime)}: ${strength} match strength`}
+                      >
+                        {strength}
+                      </div>
+                    );
+                  })}
+                  <div className="graph-caption">
+                    Bigger circles are stronger matches. Color shows closeness tier. Position is a loose spread to make clusters readable, not a map coordinate.
+                  </div>
+                </div>
+
+                <div className="cluster-stack">
+                  {Object.entries(grouped).map(([cluster, items]) => (
+                    <article key={cluster} className="cluster-group">
+                      <h3>{cluster}</h3>
+                      <div className="card-grid">
+                        {items.map((rec) => (
+                          <article key={rec.anime.id} className="anime-card">
+                            <AnimePoster anime={rec.anime} />
+                            <div className="card-body">
+                              <div className="card-topline">
+                                <SourcePill source={rec.anime.source} />
+                                <span className={`match-pill match-${strengthTone(matchStrength(rec.score, topScore))}`}>
+                                  {formatSimilarityScore(rec.score)} similar
+                                </span>
+                              </div>
+                              <h4>{titleFor(rec.anime)}</h4>
+                              <p>{rec.anime.synopsis}</p>
+                              <RecommendationReasons rec={rec} />
+                              <div className="factor-list">
+                                <FactorBar label="Genres" value={rec.breakdown.genres} />
+                                <FactorBar label="Themes" value={rec.breakdown.themes} />
+                                <FactorBar label="Synopsis" value={rec.breakdown.synopsis} />
+                                <FactorBar label="Format" value={rec.breakdown.format} />
+                                <FactorBar label="Studio" value={rec.breakdown.studios} />
+                                <FactorBar label="Year" value={rec.breakdown.year} />
+                                <FactorBar label="Score" value={Math.max(rec.breakdown.score, rec.breakdown.popularity)} />
+                              </div>
+                              <div className="detail-card-actions">
+                                <button type="button" className="secondary-button" onClick={() => openAnimeDetail(rec.anime)}>
+                                  <Info size={15} />
+                                  View details
+                                </button>
+                                <button type="button" className="primary-button" onClick={() => recommendFromAnime(rec.anime)}>
+                                  <Sparkles size={15} />
+                                  Recommend
+                                </button>
+                              </div>
+                              {rec.anime.malId && (
+                                <div className="card-footer">
+                                  <a href={`https://myanimelist.net/anime/${rec.anime.malId}`} target="_blank" rel="noreferrer" className="mal-link">
+                                    <LinkIcon size={14} /> MAL
+                                  </a>
+                                  <span className="mal-score">{rec.anime.score ? `${rec.anime.score.toFixed(2)} MAL` : "No MAL score"}</span>
+                                </div>
+                              )}
+                            </div>
+                          </article>
+                        ))}
+                      </div>
+                    </article>
+                  ))}
+                </div>
+              </>
+            )}
           </section>
         </section>
       ) : (
