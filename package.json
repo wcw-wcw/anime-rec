@@ -9,6 +9,7 @@
     "sync:mal": "node scripts/sync-mal-catalog.mjs",
     "db:migrate": "node scripts/migrate-neon.mjs",
     "db:import": "node scripts/import-neon-catalog.mjs",
+    "embeddings:generate": "node scripts/generate-embeddings.mjs",
     "build": "tsc && vite build",
     "preview": "vite preview --host 127.0.0.1"
   },

@@ -1,6 +1,8 @@
 import { loadEnv } from "./env.mjs";
-import { ensureAnimeTable, getSql } from "./neon-db.mjs";
+import { ensureAnimeEmbeddingSchema, ensureAnimeTable, getSql } from "./neon-db.mjs";
 
 await loadEnv();
-await ensureAnimeTable(getSql());
-console.log("Neon anime table is ready.");
+const sql = getSql();
+await ensureAnimeTable(sql);
+await ensureAnimeEmbeddingSchema(sql);
+console.log("Neon anime and embedding tables are ready.");

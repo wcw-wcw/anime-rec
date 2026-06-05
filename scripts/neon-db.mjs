@@ -1,4 +1,6 @@
 import { neon } from "@neondatabase/serverless";
+import { readFile } from "node:fs/promises";
+import { fileURLToPath } from "node:url";
 
 export function databaseConfigured() {
   return Boolean(process.env.DATABASE_URL);
@@ -7,6 +9,25 @@ export function databaseConfigured() {
 export function getSql() {
   if (!process.env.DATABASE_URL) throw new Error("Missing DATABASE_URL");
   return neon(process.env.DATABASE_URL);
+}
+
+export async function applyMigrationFile(path, sql = getSql()) {
+  const contents = await readFile(path, "utf8");
+  for (const statement of splitSqlStatements(contents)) {
+    await sql.query(statement);
+  }
+}
+
+export async function ensureAnimeEmbeddingSchema(sql = getSql()) {
+  const migrationPath = fileURLToPath(new URL("../database/migrations/001_pgvector_anime_embeddings.sql", import.meta.url));
+  await applyMigrationFile(migrationPath, sql);
+}
+
+function splitSqlStatements(contents) {
+  return contents
+    .split(";")
+    .map((statement) => statement.trim())
+    .filter(Boolean);
 }
 
 export async function ensureAnimeTable(sql = getSql()) {

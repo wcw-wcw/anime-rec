@@ -89,6 +89,36 @@ npm run db:import
 
 The import uploads your locally synced JSON snapshot to Neon. This keeps the larger MAL batch sync off Vercel and avoids unnecessary production API/database traffic.
 
+## Vector similarity foundation
+
+AnimeRec can now prepare semantic anime embeddings server-side without changing the visible recommender UI. Embeddings are generated locally or from a trusted server process with OpenAI `text-embedding-3-small` and stored in Neon Postgres using pgvector. No embedding vectors are committed into `src/data/animeCatalog.json`, and no OpenAI API key should ever use a `VITE_*` prefix.
+
+The embedding text is deterministic and intentionally avoids volatile fields such as score, rank, and popularity. It includes romaji/native title, synopsis, genres, themes, demographics, studios, format, and year. The script hashes that final text and skips rows whose hash is already stored for the same anime and embedding model.
+
+Add these values to your ignored `.env` file:
+
+```bash
+DATABASE_URL=your_neon_pooled_connection_string
+OPENAI_API_KEY=your_openai_api_key
+EMBEDDING_MODEL=text-embedding-3-small
+EMBEDDING_BATCH_SIZE=25
+EMBEDDING_LIMIT=
+```
+
+Apply the pgvector migration after the base anime table is available:
+
+```bash
+npm run db:migrate
+```
+
+Run a small embedding test first:
+
+```bash
+EMBEDDING_LIMIT=3 npm run embeddings:generate
+```
+
+Run the same command again to confirm unchanged records are skipped. This step only creates the storage foundation; the current Recommend, Catalog, Detail, filters, sorting, and explanation flows still use the existing explainable metadata scorer. The next planned step is a vector similarity API and a hybrid metadata plus semantic recommender.
+
 ## Persistent lookup while developing
 
 Run the local API in one terminal:
