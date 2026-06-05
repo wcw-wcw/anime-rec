@@ -32,9 +32,9 @@ Recommendation cards show a similarity score, a short "Why this matches" summary
 
 ## Recommendation filters
 
-The Recommend view includes a "Refine recommendations" panel after the base recommendation list is generated. Users can narrow the explainable metadata-based results by format, score, year range, popularity, included genres, and excluded genres, then sort by similarity, score, popularity, newest year, or title.
+The Recommend view includes a compact filter popover next to the result-count slider. Users can narrow the explainable metadata-based candidate pool by format, score range, and year range before the app fills the requested number of recommendation cards.
 
-These controls filter and sort the current deterministic recommendation results; they do not change the underlying scoring weights. Vector similarity search is planned as the next major recommendation-quality upgrade.
+The visible results can also be sorted by match percentage, age, or score. These controls filter and sort the current deterministic recommendation results; they do not change the underlying scoring weights. Vector similarity search is planned as the next major recommendation-quality upgrade.
 
 ## Run it
 

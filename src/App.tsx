@@ -23,8 +23,6 @@ import {
   factorPercent,
   findAnime,
   formatSimilarityScore,
-  getAvailableRecommendationFormats,
-  getAvailableRecommendationGenres,
   hasActiveRecommendationFilters,
   matchStrength,
   recommendAnime,
@@ -51,6 +49,7 @@ const defaultCatalogFilters: CatalogFilters = {
 };
 
 const defaultRecommendationFilters = clearRecommendationFilters();
+const recommendationFormatOptions = ["TV", "Movie"];
 
 const SourcePill = ({ source }: { source: Anime["source"] }) => (
   <span className={`source source-${source}`}>{source === "mal" ? "MAL" : source === "jikan" ? "Jikan" : "Local"}</span>
@@ -135,8 +134,11 @@ export function App() {
   const [catalogSort, setCatalogSort] = useState<CatalogSortMode>("popularity");
   const [recommendationFilters, setRecommendationFilters] = useState<RecommendationFilters>(defaultRecommendationFilters);
   const [recommendationSort, setRecommendationSort] = useState<RecommendationSortMode>("similarity_desc");
+  const [isFilterOpen, setIsFilterOpen] = useState(false);
   const [selected, setSelected] = useState<Anime | null>(defaultAnime);
-  const [recommendations, setRecommendations] = useState<Recommendation[]>(() => (defaultAnime ? recommendAnime(defaultAnime, localCatalog, 8) : []));
+  const [recommendations, setRecommendations] = useState<Recommendation[]>(() =>
+    defaultAnime ? recommendAnime(defaultAnime, localCatalog, localCatalog.length) : [],
+  );
   const [selectedDetailAnime, setSelectedDetailAnime] = useState<Anime | null>(null);
   const [lookupState, setLookupState] = useState<"idle" | "loading" | "ready" | "error">("ready");
   const [message, setMessage] = useState("Using local catalog data. Start the local API to fetch and store missing MAL entries.");
@@ -160,7 +162,7 @@ export function App() {
         const refreshedDefault = findAnime(query, remoteCatalog)[0]?.anime;
         if (refreshedDefault) {
           setSelected(refreshedDefault);
-          setRecommendations(recommendAnime(refreshedDefault, remoteCatalog, count));
+          setRecommendations(recommendAnime(refreshedDefault, remoteCatalog, remoteCatalog.length));
         }
         setMessage(`Loaded ${remoteCatalog.length} anime from local JSON storage.`);
         setCatalogLoadState("ready");
@@ -176,21 +178,21 @@ export function App() {
   const formats = useMemo(() => getUniqueFormats(catalog), [catalog]);
   const years = useMemo(() => getUniqueYears(catalog), [catalog]);
   const catalogResults = useMemo(() => sortAnimeCatalog(filterAnimeCatalog(catalog, catalogFilters), catalogSort), [catalog, catalogFilters, catalogSort]);
-  const recommendationGenres = useMemo(() => getAvailableRecommendationGenres(recommendations), [recommendations]);
-  const recommendationFormats = useMemo(() => getAvailableRecommendationFormats(recommendations), [recommendations]);
-  const filteredRecommendations = useMemo(
-    () => sortRecommendationResults(applyRecommendationFilters(recommendations, recommendationFilters), recommendationSort),
-    [recommendations, recommendationFilters, recommendationSort],
+  const filteredRecommendationPool = useMemo(() => applyRecommendationFilters(recommendations, recommendationFilters), [recommendations, recommendationFilters]);
+  const sortedRecommendationPool = useMemo(
+    () => sortRecommendationResults(filteredRecommendationPool, recommendationSort),
+    [filteredRecommendationPool, recommendationSort],
   );
+  const visibleRecommendations = useMemo(() => sortedRecommendationPool.slice(0, count), [sortedRecommendationPool, count]);
   const activeRecommendationFilterCount = useMemo(() => {
     const scalarFilters = [
       recommendationFilters.format,
       recommendationFilters.minYear,
       recommendationFilters.maxYear,
       recommendationFilters.minScore,
-      recommendationFilters.maxPopularity,
+      recommendationFilters.maxScore,
     ].filter((value) => value !== undefined && value !== "").length;
-    return scalarFilters + (recommendationFilters.includeGenres?.length ?? 0) + (recommendationFilters.excludeGenres?.length ?? 0);
+    return scalarFilters;
   }, [recommendationFilters]);
   const detailAnime = useMemo(() => {
     if (!selectedDetailAnime) return null;
@@ -202,12 +204,12 @@ export function App() {
     return recommendAnime(detailAnime, comparisonCatalog, 6);
   }, [catalog, detailAnime]);
   const grouped = useMemo(() => {
-    return filteredRecommendations.reduce<Record<string, Recommendation[]>>((acc, rec) => {
+    return visibleRecommendations.reduce<Record<string, Recommendation[]>>((acc, rec) => {
       acc[rec.cluster] = [...(acc[rec.cluster] ?? []), rec];
       return acc;
     }, {});
-  }, [filteredRecommendations]);
-  const topScore = filteredRecommendations.reduce((max, rec) => Math.max(max, rec.score), 0);
+  }, [visibleRecommendations]);
+  const topScore = visibleRecommendations.reduce((max, rec) => Math.max(max, rec.score), 0);
   const runRecommendation = async (event?: FormEvent) => {
     event?.preventDefault();
     setLookupState("loading");
@@ -262,7 +264,7 @@ export function App() {
 
       const mergedCatalog = [target, ...activeCatalog.filter((anime) => anime.malId !== target?.malId && anime.id !== target?.id)];
       setSelected(target);
-      setRecommendations(recommendAnime(target, mergedCatalog, count));
+      setRecommendations(recommendAnime(target, mergedCatalog, mergedCatalog.length));
       setLookupState("ready");
 
       const malId = extractMalId(query);
@@ -279,7 +281,7 @@ export function App() {
       const fallback = findAnime(query, catalog)[0]?.anime;
       if (fallback) {
         setSelected(fallback);
-        setRecommendations(recommendAnime(fallback, catalog, count));
+        setRecommendations(recommendAnime(fallback, catalog, catalog.length));
         setLookupState("ready");
         setMessage("Remote lookup was unavailable, so the app used the local catalog.");
       } else {
@@ -291,7 +293,7 @@ export function App() {
   const pickSuggestion = (anime: Anime) => {
     setQuery(titleFor(anime));
     setSelected(anime);
-    setRecommendations(recommendAnime(anime, catalog, count));
+    setRecommendations(recommendAnime(anime, catalog, catalog.length));
     setProviderName(localProvider.name);
     setLookupState("ready");
     setMessage(`Matched ${titleFor(anime)} from local storage.`);
@@ -299,7 +301,6 @@ export function App() {
 
   const refreshCount = (nextCount: number) => {
     setCount(nextCount);
-    if (selected) setRecommendations(recommendAnime(selected, catalog, nextCount));
   };
 
   const updateCatalogFilter = <Key extends keyof CatalogFilters>(key: Key, value: CatalogFilters[Key]) => {
@@ -310,29 +311,16 @@ export function App() {
     setRecommendationFilters((current) => ({ ...current, [key]: value }));
   };
 
-  const updateRecommendationNumberFilter = (key: "minYear" | "maxYear" | "minScore" | "maxPopularity", value: string) => {
+  const updateRecommendationNumberFilter = (key: "minYear" | "maxYear" | "minScore" | "maxScore", value: string) => {
     const parsed = value === "" ? undefined : Number(value);
     updateRecommendationFilter(key, Number.isFinite(parsed) ? parsed : undefined);
-  };
-
-  const toggleRecommendationGenre = (key: "includeGenres" | "excludeGenres", genre: string) => {
-    setRecommendationFilters((current) => {
-      const currentValues = current[key] ?? [];
-      const nextValues = currentValues.includes(genre) ? currentValues.filter((value) => value !== genre) : [...currentValues, genre];
-      const opposingKey = key === "includeGenres" ? "excludeGenres" : "includeGenres";
-      return {
-        ...current,
-        [key]: nextValues,
-        [opposingKey]: (current[opposingKey] ?? []).filter((value) => value !== genre),
-      };
-    });
   };
 
   const recommendFromCatalog = (anime: Anime) => {
     const title = titleFor(anime);
     setQuery(title);
     setSelected(anime);
-    setRecommendations(recommendAnime(anime, catalog, count));
+    setRecommendations(recommendAnime(anime, catalog, catalog.length));
     setProviderName(localProvider.name);
     setLookupState("ready");
     setActiveView("recommend");
@@ -354,7 +342,7 @@ export function App() {
     const comparisonCatalog = [anime, ...catalog.filter((item) => item.id !== anime.id && item.malId !== anime.malId)];
     setQuery(title);
     setSelected(anime);
-    setRecommendations(recommendAnime(anime, comparisonCatalog, count));
+    setRecommendations(recommendAnime(anime, comparisonCatalog, comparisonCatalog.length));
     setProviderName(localProvider.name);
     setLookupState("ready");
     setActiveView("recommend");
@@ -400,11 +388,102 @@ export function App() {
             </div>
 
             <div className="controls-row">
-              <label className="count-control" htmlFor="count">
-                <SlidersHorizontal size={18} />
-                <span>{count} results</span>
+              <div className="count-control">
+                <label htmlFor="count">{count} results</label>
                 <input id="count" type="range" min="3" max="50" value={count} onChange={(event) => refreshCount(Number(event.target.value))} />
-              </label>
+                <div className="filter-popover-wrap">
+                  <button
+                    type="button"
+                    className={`filter-toggle ${hasActiveRecommendationFilters(recommendationFilters) ? "active" : ""}`}
+                    onClick={() => setIsFilterOpen((current) => !current)}
+                    aria-expanded={isFilterOpen}
+                    aria-controls="recommendation-filter-popover"
+                    title="Filter recommendations"
+                  >
+                    <SlidersHorizontal size={19} />
+                    {activeRecommendationFilterCount > 0 && <span>{activeRecommendationFilterCount}</span>}
+                  </button>
+
+                  {isFilterOpen && (
+                    <section id="recommendation-filter-popover" className="filter-popover" aria-label="Recommendation filters">
+                      <div className="filter-popover-heading">
+                        <strong>Filter results</strong>
+                        <button
+                          type="button"
+                          onClick={() => setRecommendationFilters(clearRecommendationFilters())}
+                          disabled={!hasActiveRecommendationFilters(recommendationFilters)}
+                        >
+                          Clear
+                        </button>
+                      </div>
+
+                      <label>
+                        Format
+                        <select value={recommendationFilters.format ?? ""} onChange={(event) => updateRecommendationFilter("format", event.target.value)}>
+                          <option value="">All formats</option>
+                          {recommendationFormatOptions.map((format) => (
+                            <option key={format} value={format}>{format}</option>
+                          ))}
+                        </select>
+                      </label>
+
+                      <div className="filter-field-pair">
+                        <label>
+                          Min score
+                          <input
+                            type="number"
+                            min="0"
+                            max="10"
+                            step="0.1"
+                            placeholder="Any"
+                            value={recommendationFilters.minScore ?? ""}
+                            onChange={(event) => updateRecommendationNumberFilter("minScore", event.target.value)}
+                          />
+                        </label>
+
+                        <label>
+                          Max score
+                          <input
+                            type="number"
+                            min="0"
+                            max="10"
+                            step="0.1"
+                            placeholder="Any"
+                            value={recommendationFilters.maxScore ?? ""}
+                            onChange={(event) => updateRecommendationNumberFilter("maxScore", event.target.value)}
+                          />
+                        </label>
+                      </div>
+
+                      <div className="filter-field-pair">
+                        <label>
+                          From year
+                          <input
+                            type="number"
+                            min="1900"
+                            max="2100"
+                            placeholder="Any"
+                            value={recommendationFilters.minYear ?? ""}
+                            onChange={(event) => updateRecommendationNumberFilter("minYear", event.target.value)}
+                          />
+                        </label>
+
+                        <label>
+                          To year
+                          <input
+                            type="number"
+                            min="1900"
+                            max="2100"
+                            placeholder="Any"
+                            value={recommendationFilters.maxYear ?? ""}
+                            onChange={(event) => updateRecommendationNumberFilter("maxYear", event.target.value)}
+                          />
+                        </label>
+                      </div>
+                    </section>
+                  )}
+                </div>
+              </div>
               <div className="provider-chip">
                 <Gauge size={18} />
                 <span>{providerName}</span>
@@ -738,7 +817,7 @@ export function App() {
                 <span className="eyebrow">Similarity graph</span>
                 <h2>Recommended neighbors</h2>
               </div>
-              <span className="catalog-count">Showing {filteredRecommendations.length} of {recommendations.length} recommendations</span>
+              <span className="catalog-count">Showing {visibleRecommendations.length} of {filteredRecommendationPool.length} matches</span>
             </div>
 
             <div className="score-explainer">
@@ -757,149 +836,23 @@ export function App() {
               </div>
             </div>
 
-            <section className="recommendation-refine" aria-label="Refine recommendations">
-              <div className="refine-heading">
-                <div>
-                  <span className="eyebrow"><SlidersHorizontal size={15} /> Refine recommendations</span>
-                  <p>Showing {filteredRecommendations.length} of {recommendations.length} recommendations</p>
-                </div>
-                <button
-                  type="button"
-                  className="secondary-button"
-                  onClick={() => setRecommendationFilters(clearRecommendationFilters())}
-                  disabled={!hasActiveRecommendationFilters(recommendationFilters)}
-                >
-                  Clear filters
-                </button>
-              </div>
+            <div className="recommendation-toolbar">
+              <span>{hasActiveRecommendationFilters(recommendationFilters) ? `${filteredRecommendationPool.length} filtered matches` : `${recommendations.length} candidate matches`}</span>
+              <label>
+                Sort
+                <select value={recommendationSort} onChange={(event) => setRecommendationSort(event.target.value as RecommendationSortMode)}>
+                  <option value="similarity_desc">Match %</option>
+                  <option value="year_desc">Age</option>
+                  <option value="score_desc">Score</option>
+                </select>
+              </label>
+            </div>
 
-              <div className="refine-controls">
-                <label>
-                  Format
-                  <select value={recommendationFilters.format ?? ""} onChange={(event) => updateRecommendationFilter("format", event.target.value)}>
-                    <option value="">All formats</option>
-                    {recommendationFormats.map((format) => (
-                      <option key={format} value={format}>{format}</option>
-                    ))}
-                  </select>
-                </label>
-
-                <label>
-                  Min score
-                  <input
-                    type="number"
-                    min="0"
-                    max="10"
-                    step="0.1"
-                    placeholder="Any"
-                    value={recommendationFilters.minScore ?? ""}
-                    onChange={(event) => updateRecommendationNumberFilter("minScore", event.target.value)}
-                  />
-                </label>
-
-                <label>
-                  From year
-                  <input
-                    type="number"
-                    min="1900"
-                    max="2100"
-                    placeholder="Any"
-                    value={recommendationFilters.minYear ?? ""}
-                    onChange={(event) => updateRecommendationNumberFilter("minYear", event.target.value)}
-                  />
-                </label>
-
-                <label>
-                  To year
-                  <input
-                    type="number"
-                    min="1900"
-                    max="2100"
-                    placeholder="Any"
-                    value={recommendationFilters.maxYear ?? ""}
-                    onChange={(event) => updateRecommendationNumberFilter("maxYear", event.target.value)}
-                  />
-                </label>
-
-                <label>
-                  Max popularity
-                  <input
-                    type="number"
-                    min="1"
-                    step="1"
-                    placeholder="Any"
-                    value={recommendationFilters.maxPopularity ?? ""}
-                    onChange={(event) => updateRecommendationNumberFilter("maxPopularity", event.target.value)}
-                  />
-                </label>
-
-                <label>
-                  Sort
-                  <select value={recommendationSort} onChange={(event) => setRecommendationSort(event.target.value as RecommendationSortMode)}>
-                    <option value="similarity_desc">Similarity</option>
-                    <option value="score_desc">Score</option>
-                    <option value="popularity_asc">Popularity</option>
-                    <option value="year_desc">Newest</option>
-                    <option value="title_asc">Title</option>
-                  </select>
-                </label>
-              </div>
-
-              {activeRecommendationFilterCount > 0 && (
-                <div className="active-filter-row" aria-label="Active recommendation filters">
-                  <span>{activeRecommendationFilterCount} active</span>
-                  {recommendationFilters.format && <strong>{recommendationFilters.format}</strong>}
-                  {recommendationFilters.minScore !== undefined && <strong>{recommendationFilters.minScore.toFixed(1)}+ score</strong>}
-                  {recommendationFilters.minYear !== undefined && <strong>From {recommendationFilters.minYear}</strong>}
-                  {recommendationFilters.maxYear !== undefined && <strong>To {recommendationFilters.maxYear}</strong>}
-                  {recommendationFilters.maxPopularity !== undefined && <strong>Top {recommendationFilters.maxPopularity.toLocaleString()}</strong>}
-                  {(recommendationFilters.includeGenres ?? []).map((genre) => <strong key={`include-${genre}`}>Include {genre}</strong>)}
-                  {(recommendationFilters.excludeGenres ?? []).map((genre) => <strong key={`exclude-${genre}`}>Exclude {genre}</strong>)}
-                </div>
-              )}
-
-              {recommendationGenres.length > 0 && (
-                <div className="genre-filter-grid">
-                  <fieldset>
-                    <legend>Include genres</legend>
-                    <div>
-                      {recommendationGenres.map((genre) => (
-                        <label key={genre}>
-                          <input
-                            type="checkbox"
-                            checked={(recommendationFilters.includeGenres ?? []).includes(genre)}
-                            onChange={() => toggleRecommendationGenre("includeGenres", genre)}
-                          />
-                          <span>{genre}</span>
-                        </label>
-                      ))}
-                    </div>
-                  </fieldset>
-
-                  <fieldset>
-                    <legend>Exclude genres</legend>
-                    <div>
-                      {recommendationGenres.map((genre) => (
-                        <label key={genre}>
-                          <input
-                            type="checkbox"
-                            checked={(recommendationFilters.excludeGenres ?? []).includes(genre)}
-                            onChange={() => toggleRecommendationGenre("excludeGenres", genre)}
-                          />
-                          <span>{genre}</span>
-                        </label>
-                      ))}
-                    </div>
-                  </fieldset>
-                </div>
-              )}
-            </section>
-
-            {filteredRecommendations.length === 0 ? (
+            {visibleRecommendations.length === 0 ? (
               <section className="empty-state catalog-state recommendation-empty">
                 <Search size={24} />
                 <h2>No recommendations match these filters.</h2>
-                <p>Try lowering the score or clearing genre filters.</p>
+                <p>Try widening the score range, changing format, or clearing the year filters.</p>
               </section>
             ) : (
               <>
@@ -910,7 +863,7 @@ export function App() {
                     <span><i className="tone-moderate" /> Similar</span>
                     <span><i className="tone-light" /> Looser</span>
                   </div>
-                  {filteredRecommendations.map((rec, index) => {
+                  {visibleRecommendations.map((rec, index) => {
                     const strength = matchStrength(rec.score, topScore);
                     const tone = strengthTone(strength);
                     return (
@@ -954,11 +907,8 @@ export function App() {
                               <RecommendationReasons rec={rec} />
                               <div className="factor-list">
                                 <FactorBar label="Genres" value={rec.breakdown.genres} />
-                                <FactorBar label="Themes" value={rec.breakdown.themes} />
                                 <FactorBar label="Synopsis" value={rec.breakdown.synopsis} />
                                 <FactorBar label="Format" value={rec.breakdown.format} />
-                                <FactorBar label="Studio" value={rec.breakdown.studios} />
-                                <FactorBar label="Year" value={rec.breakdown.year} />
                                 <FactorBar label="Score" value={Math.max(rec.breakdown.score, rec.breakdown.popularity)} />
                               </div>
                               <div className="detail-card-actions">

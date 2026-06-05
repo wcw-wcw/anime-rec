@@ -394,16 +394,12 @@ export const recommendAnime = (target: Anime, catalog: Anime[], count: number): 
 
 const cleanNumber = (value: number | undefined) => (typeof value === "number" && Number.isFinite(value) ? value : undefined);
 
-const normalizedGenreSet = (genres: string[] | undefined) => new Set((genres ?? []).map(normalize));
-
 export const clearRecommendationFilters = (): RecommendationFilters => ({
   format: "",
   minYear: undefined,
   maxYear: undefined,
   minScore: undefined,
-  maxPopularity: undefined,
-  includeGenres: [],
-  excludeGenres: [],
+  maxScore: undefined,
 });
 
 export const hasActiveRecommendationFilters = (filters: RecommendationFilters) =>
@@ -412,13 +408,8 @@ export const hasActiveRecommendationFilters = (filters: RecommendationFilters) =
       cleanNumber(filters.minYear) !== undefined ||
       cleanNumber(filters.maxYear) !== undefined ||
       cleanNumber(filters.minScore) !== undefined ||
-      cleanNumber(filters.maxPopularity) !== undefined ||
-      (filters.includeGenres?.length ?? 0) > 0 ||
-      (filters.excludeGenres?.length ?? 0) > 0,
+      cleanNumber(filters.maxScore) !== undefined,
   );
-
-export const getAvailableRecommendationGenres = (results: Recommendation[]) =>
-  [...new Set(results.flatMap((result) => result.anime.genres ?? []).filter(Boolean))].sort((left, right) => left.localeCompare(right));
 
 export const getAvailableRecommendationFormats = (results: Recommendation[]) =>
   [...new Set(results.map((result) => result.anime.format).filter(Boolean))].sort((left, right) => left.localeCompare(right));
@@ -429,25 +420,21 @@ export const applyRecommendationFilters = (results: Recommendation[], filters: R
   const startYear = minYear !== undefined && maxYear !== undefined ? Math.min(minYear, maxYear) : minYear;
   const endYear = minYear !== undefined && maxYear !== undefined ? Math.max(minYear, maxYear) : maxYear;
   const minScore = cleanNumber(filters.minScore);
-  const maxPopularity = cleanNumber(filters.maxPopularity);
-  const includeGenres = (filters.includeGenres ?? []).map(normalize).filter(Boolean);
-  const excludeGenres = (filters.excludeGenres ?? []).map(normalize).filter(Boolean);
+  const maxScore = cleanNumber(filters.maxScore);
+  const scoreFloor = minScore !== undefined && maxScore !== undefined ? Math.min(minScore, maxScore) : minScore;
+  const scoreCeiling = minScore !== undefined && maxScore !== undefined ? Math.max(minScore, maxScore) : maxScore;
 
   return results.filter((result) => {
     const { anime } = result;
     const year = cleanNumber(anime.year);
     const score = cleanNumber(anime.score);
-    const popularity = cleanNumber(anime.popularity);
-    const genres = normalizedGenreSet(anime.genres);
 
     return (
       (!filters.format || anime.format === filters.format) &&
       (startYear === undefined || (year !== undefined && year >= startYear)) &&
       (endYear === undefined || (year !== undefined && year <= endYear)) &&
-      (minScore === undefined || (score !== undefined && score >= minScore)) &&
-      (maxPopularity === undefined || (popularity !== undefined && popularity <= maxPopularity)) &&
-      includeGenres.every((genre) => genres.has(genre)) &&
-      excludeGenres.every((genre) => !genres.has(genre))
+      (scoreFloor === undefined || (score !== undefined && score >= scoreFloor)) &&
+      (scoreCeiling === undefined || (score !== undefined && score <= scoreCeiling))
     );
   });
 };

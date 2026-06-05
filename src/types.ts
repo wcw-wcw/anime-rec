@@ -80,9 +80,7 @@ export interface RecommendationFilters {
   minYear?: number;
   maxYear?: number;
   minScore?: number;
-  maxPopularity?: number;
-  includeGenres?: string[];
-  excludeGenres?: string[];
+  maxScore?: number;
 }
 
 export interface SearchMatch {
