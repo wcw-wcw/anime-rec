@@ -6,12 +6,17 @@ import { buildAnimeEmbeddingText, hashEmbeddingText } from "./utils/embedding-te
 const VECTOR_DIMENSIONS = 1536;
 const DEFAULT_MODEL = "text-embedding-3-small";
 const DEFAULT_BATCH_SIZE = 25;
+const DEFAULT_BATCH_DELAY_MS = 10000;
+const DEFAULT_MAX_RETRIES = 5;
+const TOKENS_PER_MINUTE_LIMIT = 40000;
 
 await loadEnv();
 
 const model = process.env.EMBEDDING_MODEL || DEFAULT_MODEL;
 const batchSize = readPositiveInteger(process.env.EMBEDDING_BATCH_SIZE, DEFAULT_BATCH_SIZE);
 const limit = readOptionalPositiveInteger(process.env.EMBEDDING_LIMIT);
+const batchDelayMs = readNonNegativeInteger(process.env.EMBEDDING_BATCH_DELAY_MS, DEFAULT_BATCH_DELAY_MS);
+const maxRetries = readPositiveInteger(process.env.EMBEDDING_MAX_RETRIES, DEFAULT_MAX_RETRIES);
 
 if (!process.env.DATABASE_URL) {
   throw new Error("Missing DATABASE_URL. Add your Neon connection string to .env before generating embeddings.");
@@ -43,6 +48,7 @@ for (const anime of sourceCatalog) {
 }
 
 console.log(`Preparing embeddings for ${candidates.length} anime with model ${model}.`);
+console.log(`Embedding pacing: batch size ${batchSize}, minimum delay ${batchDelayMs}ms, max retries ${maxRetries}.`);
 
 let skipped = 0;
 let insertedOrUpdated = 0;
@@ -76,7 +82,7 @@ for (const candidate of candidates) {
     });
 
     if (pending.length >= batchSize) {
-      const result = await flushBatch(pending, { model, sql });
+      const result = await flushBatch(pending, { batchDelayMs, maxRetries, model, sql });
       insertedOrUpdated += result.insertedOrUpdated;
       failed += result.failed;
       pending = [];
@@ -89,12 +95,13 @@ for (const candidate of candidates) {
 }
 
 if (pending.length) {
-  const result = await flushBatch(pending, { model, sql });
+  const result = await flushBatch(pending, { batchDelayMs, maxRetries, model, sql });
   insertedOrUpdated += result.insertedOrUpdated;
   failed += result.failed;
 }
 
 console.log(`Done. ${insertedOrUpdated} upserted, ${skipped} skipped, ${failed} failed.`);
+if (failed > 0) process.exitCode = 1;
 
 async function assertEmbeddingSchema(sql) {
   const [status] = await sql.query(`
@@ -108,9 +115,13 @@ async function assertEmbeddingSchema(sql) {
   }
 }
 
-async function flushBatch(records, { model, sql }) {
+async function flushBatch(records, { batchDelayMs, maxRetries, model, sql }) {
+  const approximateTokens = estimateTokens(records.map((record) => record.embeddingText));
+  const safeDelayMs = Math.max(batchDelayMs, Math.ceil((approximateTokens / TOKENS_PER_MINUTE_LIMIT) * 60000));
+  console.log(`Embedding batch: ${records.length} anime, about ${approximateTokens} input tokens, next-delay ${safeDelayMs}ms.`);
+
   try {
-    const vectors = await createEmbeddings(records.map((record) => record.embeddingText), model);
+    const vectors = await createEmbeddingsWithRetries(records.map((record) => record.embeddingText), { maxRetries, model });
     let insertedOrUpdated = 0;
     let failed = 0;
 
@@ -137,13 +148,35 @@ async function flushBatch(records, { model, sql }) {
         console.warn(`Skipping anime ${record.animeId}: ${formatError(error)}`);
       }
     }
-
+    await sleep(safeDelayMs);
     return { insertedOrUpdated, failed };
   } catch (error) {
     for (const record of records) {
       console.warn(`Skipping anime ${record.animeId}: ${formatError(error)}`);
     }
+    await sleep(safeDelayMs);
     return { insertedOrUpdated: 0, failed: records.length };
+  }
+}
+
+async function createEmbeddingsWithRetries(inputs, { maxRetries, model }) {
+  let attempt = 0;
+
+  while (true) {
+    try {
+      return await createEmbeddings(inputs, model);
+    } catch (error) {
+      attempt += 1;
+      const retryable = isRetryableOpenAIError(error);
+
+      if (!retryable || attempt > maxRetries) {
+        throw error;
+      }
+
+      const delayMs = getRetryDelayMs(error, attempt);
+      console.warn(`OpenAI embeddings request was rate limited or temporarily unavailable. Retrying attempt ${attempt}/${maxRetries} after ${delayMs}ms.`);
+      await sleep(delayMs);
+    }
   }
 }
 
@@ -158,8 +191,7 @@ async function createEmbeddings(inputs, model) {
   });
 
   if (!response.ok) {
-    const body = await response.text();
-    throw new Error(`OpenAI embeddings request failed with ${response.status}: ${body.slice(0, 300)}`);
+    throw await createOpenAIError(response);
   }
 
   const payload = await response.json();
@@ -167,6 +199,25 @@ async function createEmbeddings(inputs, model) {
   return data
     .sort((left, right) => left.index - right.index)
     .map((item) => item.embedding);
+}
+
+async function createOpenAIError(response) {
+  let message = "";
+  let errorCode = "";
+
+  try {
+    const payload = await response.json();
+    message = typeof payload?.error?.message === "string" ? payload.error.message : "";
+    errorCode = typeof payload?.error?.code === "string" ? payload.error.code : "";
+  } catch {
+    message = "";
+  }
+
+  const error = new Error(`OpenAI embeddings request failed with ${response.status}${message ? `: ${message}` : ""}`);
+  error.status = response.status;
+  error.code = errorCode;
+  error.retryAfterMs = readRetryAfterMs(response.headers.get("retry-after"));
+  return error;
 }
 
 async function upsertEmbedding(sql, { animeId, model, embeddingTextHash, vector }) {
@@ -194,6 +245,11 @@ function readPositiveInteger(value, fallback) {
   return Number.isInteger(parsed) && parsed > 0 ? parsed : fallback;
 }
 
+function readNonNegativeInteger(value, fallback) {
+  const parsed = Number(value);
+  return Number.isInteger(parsed) && parsed >= 0 ? parsed : fallback;
+}
+
 function readOptionalPositiveInteger(value) {
   if (!value) return null;
   const parsed = Number(value);
@@ -202,4 +258,31 @@ function readOptionalPositiveInteger(value) {
 
 function formatError(error) {
   return error instanceof Error ? error.message : String(error);
+}
+
+function estimateTokens(inputs) {
+  return inputs.reduce((total, input) => total + Math.ceil(input.length / 4), 0);
+}
+
+function isRetryableOpenAIError(error) {
+  if (error?.code === "insufficient_quota") return false;
+  if (typeof error?.message === "string" && error.message.toLowerCase().includes("exceeded your current quota")) return false;
+  return error?.status === 429 || error?.status === 500 || error?.status === 502 || error?.status === 503 || error?.status === 504;
+}
+
+function getRetryDelayMs(error, attempt) {
+  if (Number.isFinite(error?.retryAfterMs) && error.retryAfterMs > 0) return error.retryAfterMs;
+  return Math.min(120000, 5000 * 2 ** (attempt - 1));
+}
+
+function readRetryAfterMs(value) {
+  if (!value) return null;
+  const seconds = Number(value);
+  if (Number.isFinite(seconds)) return Math.max(0, seconds * 1000);
+  const timestamp = Date.parse(value);
+  return Number.isFinite(timestamp) ? Math.max(0, timestamp - Date.now()) : null;
+}
+
+function sleep(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
 }

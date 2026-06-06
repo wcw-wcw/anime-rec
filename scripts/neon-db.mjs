@@ -87,6 +87,97 @@ export async function getDatabaseCatalog(sql = getSql()) {
   return rows.map(fromDatabaseRow);
 }
 
+export async function getVectorSimilarAnime({ animeId, limit = 20, model = "text-embedding-3-small", sql = getSql() }) {
+  const [embeddingStatus] = await sql.query(
+    `
+      select count(*)::int as embedding_count
+      from animerec.anime_embeddings
+      where embedding_model = $1
+    `,
+    [model],
+  );
+
+  if (!embeddingStatus?.embedding_count) {
+    return { status: "empty", source: null, similar: [] };
+  }
+
+  const [sourceRow] = await sql.query(
+    `
+      select
+        a.mal_id,
+        a.title_romaji,
+        a.title_english,
+        a.title_native
+      from animerec.anime_embeddings ae
+      join animerec.anime a on a.mal_id = ae.anime_id
+      where ae.anime_id = $1 and ae.embedding_model = $2
+      limit 1
+    `,
+    [animeId, model],
+  );
+
+  if (!sourceRow) {
+    return { status: "missing_source_embedding", source: null, similar: [] };
+  }
+
+  const rows = await sql.query(
+    `
+      with source_embedding as (
+        select embedding
+        from animerec.anime_embeddings
+        where anime_id = $1 and embedding_model = $2
+        limit 1
+      )
+      select
+        a.mal_id,
+        a.title_romaji,
+        a.title_english,
+        a.title_native,
+        a.image_url,
+        a.synopsis,
+        a.genres,
+        a.themes,
+        a.demographics,
+        a.studios,
+        a.year,
+        a.format,
+        a.episodes,
+        a.score,
+        a.rank,
+        a.popularity,
+        a.ranking_types,
+        a.source,
+        (ae.embedding <=> se.embedding)::float as vector_distance
+      from animerec.anime_embeddings ae
+      join source_embedding se on true
+      join animerec.anime a on a.mal_id = ae.anime_id
+      where ae.embedding_model = $2
+        and ae.anime_id <> $1
+      order by vector_distance asc, a.rank nulls last, a.popularity nulls last, a.mal_id
+      limit $3
+    `,
+    [animeId, model, limit],
+  );
+
+  return {
+    status: "ok",
+    source: {
+      id: sourceRow.mal_id,
+      malId: sourceRow.mal_id,
+      title: {
+        romaji: sourceRow.title_romaji,
+        english: sourceRow.title_english ?? undefined,
+        native: sourceRow.title_native ?? undefined,
+      },
+    },
+    similar: rows.map((row) => ({
+      anime: fromDatabaseRow(row),
+      vectorDistance: Number(row.vector_distance),
+      vectorSimilarity: normalizeVectorSimilarity(Number(row.vector_distance)),
+    })),
+  };
+}
+
 export async function upsertAnimeCatalog(anime, sql = getSql()) {
   if (!anime.length) return;
   await ensureAnimeTable(sql);
@@ -226,4 +317,9 @@ function fromDatabaseRow(row) {
     rankingTypes: row.ranking_types ?? [],
     source: row.source,
   };
+}
+
+function normalizeVectorSimilarity(distance) {
+  if (!Number.isFinite(distance)) return 0;
+  return Math.max(0, Math.min(100, (1 - distance) * 100));
 }

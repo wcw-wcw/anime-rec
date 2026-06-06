@@ -102,6 +102,8 @@ DATABASE_URL=your_neon_pooled_connection_string
 OPENAI_API_KEY=your_openai_api_key
 EMBEDDING_MODEL=text-embedding-3-small
 EMBEDDING_BATCH_SIZE=25
+EMBEDDING_BATCH_DELAY_MS=10000
+EMBEDDING_MAX_RETRIES=5
 EMBEDDING_LIMIT=
 ```
 
@@ -117,7 +119,60 @@ Run a small embedding test first:
 EMBEDDING_LIMIT=3 npm run embeddings:generate
 ```
 
-Run the same command again to confirm unchanged records are skipped. This step only creates the storage foundation; the current Recommend, Catalog, Detail, filters, sorting, and explanation flows still use the existing explainable metadata scorer. The next planned step is a vector similarity API and a hybrid metadata plus semantic recommender.
+Run the same command again to confirm unchanged records are skipped. The default embedding pace is conservative for low OpenAI limits: 25 anime per request, at least 10 seconds between batches, and up to 5 retries for rate-limit or temporary server errors. The script logs approximate input tokens per batch, but never logs API keys, database URLs, or full embedding vectors.
+
+For a larger smoke test:
+
+```bash
+EMBEDDING_LIMIT=100 npm run embeddings:generate
+```
+
+Then run the full generation with no `EMBEDDING_LIMIT`. This step only creates the storage foundation; the current Recommend, Catalog, Detail, filters, sorting, and explanation flows still use the existing explainable metadata scorer. The next planned step is a vector similarity API and a hybrid metadata plus semantic recommender.
+
+## Vector similarity API
+
+The backend exposes a validation endpoint for stored pgvector neighbors:
+
+```bash
+GET /api/vector-similar?animeId=5114&limit=20
+```
+
+`animeId` is the MAL/anime ID stored in Neon. `limit` is optional, defaults to 20, and is clamped between 1 and 50. The endpoint does not call OpenAI; it compares existing stored embeddings only, using cosine distance in Neon/Postgres.
+
+Example response shape:
+
+```json
+{
+  "source": {
+    "id": 5114,
+    "malId": 5114,
+    "title": {
+      "romaji": "Fullmetal Alchemist: Brotherhood"
+    }
+  },
+  "embeddingModel": "text-embedding-3-small",
+  "scoreType": "vector_semantic_similarity",
+  "limit": 20,
+  "similar": [
+    {
+      "anime": {
+        "id": 121,
+        "malId": 121,
+        "title": {
+          "romaji": "Fullmetal Alchemist"
+        },
+        "genres": ["Action", "Adventure", "Drama", "Fantasy"],
+        "format": "TV",
+        "year": 2003
+      },
+      "vectorDistance": 0.12,
+      "vectorSimilarity": 88
+    }
+  ]
+}
+```
+
+This is currently a backend validation endpoint, not part of the visible recommender UI. It does not return raw vectors, API keys, or database connection details. The next planned step is blending this semantic signal with the existing explainable metadata recommender.
 
 ## Persistent lookup while developing
 

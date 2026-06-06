@@ -2,10 +2,14 @@ import http from "node:http";
 import { createMalClient } from "./mal-client.mjs";
 import { readCatalog, mergeAnimeCatalog, writeCatalog } from "./catalog-storage.mjs";
 import { extractMalId, findExistingAnime, pickBestSearchResult } from "./catalog-lookup.mjs";
+import { databaseConfigured, getSql, getVectorSimilarAnime } from "./neon-db.mjs";
 
 const host = "127.0.0.1";
 const port = Number(process.env.PORT ?? 8787);
 const client = await createMalClient();
+const DEFAULT_VECTOR_LIMIT = 20;
+const MAX_VECTOR_LIMIT = 50;
+const DEFAULT_EMBEDDING_MODEL = "text-embedding-3-small";
 
 function sendJson(response, status, body) {
   response.writeHead(status, {
@@ -59,6 +63,42 @@ const server = http.createServer(async (request, response) => {
       return;
     }
 
+    if (request.method === "GET" && url.pathname === "/api/vector-similar") {
+      const animeId = parseAnimeId(url.searchParams.get("animeId") ?? url.searchParams.get("malId"));
+      if (!animeId) {
+        sendJson(response, 400, { error: "Missing or invalid animeId query parameter" });
+        return;
+      }
+
+      if (!databaseConfigured()) {
+        sendJson(response, 500, { error: "Database is not configured" });
+        return;
+      }
+
+      const limit = clampVectorLimit(url.searchParams.get("limit"));
+      const embeddingModel = process.env.EMBEDDING_MODEL || DEFAULT_EMBEDDING_MODEL;
+      const result = await getVectorSimilarAnime({ animeId, limit, model: embeddingModel, sql: getSql() });
+
+      if (result.status === "empty") {
+        sendJson(response, 404, { error: "No anime embeddings are available for vector similarity yet" });
+        return;
+      }
+
+      if (result.status === "missing_source_embedding") {
+        sendJson(response, 404, { error: "No embedding found for the requested anime", animeId });
+        return;
+      }
+
+      sendJson(response, 200, {
+        source: result.source,
+        embeddingModel,
+        scoreType: "vector_semantic_similarity",
+        limit,
+        similar: result.similar,
+      });
+      return;
+    }
+
     sendJson(response, 404, { error: "Not found" });
   } catch (error) {
     sendJson(response, 500, { error: error instanceof Error ? error.message : "Unknown server error" });
@@ -68,3 +108,14 @@ const server = http.createServer(async (request, response) => {
 server.listen(port, host, () => {
   console.log(`AnimeRec catalog API listening at http://${host}:${port}`);
 });
+
+function parseAnimeId(value) {
+  const parsed = Number(value);
+  return Number.isInteger(parsed) && parsed > 0 ? parsed : null;
+}
+
+function clampVectorLimit(value) {
+  const parsed = Number(value);
+  if (!Number.isInteger(parsed)) return DEFAULT_VECTOR_LIMIT;
+  return Math.max(1, Math.min(MAX_VECTOR_LIMIT, parsed));
+}
