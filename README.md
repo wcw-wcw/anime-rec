@@ -9,6 +9,7 @@ A React/Vite anime recommendation prototype. It works today with a local starter
 - Open anime detail views with poster art, synopsis, metadata, source info, and similar recommendations.
 - Choose how many recommendations to return.
 - Local similarity engine using genres, themes, demographics, synopsis/title token overlap, format, year, and studio.
+- Metadata, Semantic, and Hybrid recommendation modes for comparing explainable rules against stored vector similarity.
 - Cluster labels for nearby groups such as battle fantasy, emotional drama, and speculative systems.
 - Provider layer for local data, Jikan fallback, and MyAnimeList API access.
 
@@ -24,17 +25,27 @@ Catalog cards, recommendation cards, and the currently selected source anime can
 
 The detail view uses the currently loaded local/API catalog and the existing metadata recommender to show similar anime. It can also start a fresh recommendation run from the displayed anime without introducing separate routes or authentication.
 
+## Hybrid recommendations
+
+The Recommend view supports three selectable modes:
+
+- Metadata: the original explainable rule/metadata recommender using genres, themes, demographics, local synopsis/title text similarity, format, year, studio, and score/popularity metadata.
+- Semantic: pgvector nearest neighbors from stored anime embeddings returned by `/api/vector-similar`. This mode labels vector similarity as the primary score and avoids metadata-only factor bars.
+- Hybrid: a blended ranking using 65% metadata score and 35% semantic similarity. Cards show the available metadata, semantic, and hybrid scores so one-source matches are clear instead of hidden.
+
+OpenAI is used only during offline or trusted server-side embedding generation. Normal recommendation browsing does not call OpenAI from the frontend, does not expose raw embeddings, and does not expose database secrets.
+
 ## Explainable recommendations
 
-Recommendations are currently rule/metadata-based and deterministic. The app ranks titles with shared genres, themes, demographics, synopsis text similarity, title overlap, format, year, studio, and score/popularity metadata.
+The Metadata mode is rule/metadata-based and deterministic. The app ranks titles with shared genres, themes, demographics, synopsis text similarity, title overlap, format, year, studio, and score/popularity metadata.
 
-Recommendation cards show a similarity score, a short "Why this matches" summary, top match reasons, and factor bars for the strongest scoring signals. These explanations are intended to describe the current metadata scorer honestly; vector or embedding similarity is a future enhancement, not part of the current recommender.
+Recommendation cards show a similarity score, a short "Why this matches" summary, top match reasons, and factor bars for the strongest metadata scoring signals. These explanations are intended to describe the current metadata scorer honestly; Semantic mode labels embedding similarity separately.
 
 ## Recommendation filters
 
 The Recommend view includes a compact filter popover next to the result-count slider. Users can narrow the explainable metadata-based candidate pool by format, score range, and year range before the app fills the requested number of recommendation cards.
 
-The visible results can also be sorted by match percentage, age, or score. These controls filter and sort the current deterministic recommendation results; they do not change the underlying scoring weights. Vector similarity search is planned as the next major recommendation-quality upgrade.
+The visible results can also be sorted by match percentage, age, or score. These controls filter and sort the active Metadata, Semantic, or Hybrid recommendation list; they do not change the underlying metadata scoring weights.
 
 ## Run it
 
@@ -172,7 +183,7 @@ Example response shape:
 }
 ```
 
-This is currently a backend validation endpoint, not part of the visible recommender UI. It does not return raw vectors, API keys, or database connection details. The next planned step is blending this semantic signal with the existing explainable metadata recommender.
+The visible Semantic and Hybrid recommendation modes use this endpoint. It does not return raw vectors, API keys, or database connection details.
 
 ## Persistent lookup while developing
 

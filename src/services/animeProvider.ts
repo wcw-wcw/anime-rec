@@ -1,4 +1,4 @@
-import type { Anime } from "../types";
+import type { Anime, VectorSimilarAnimeResponse } from "../types";
 import { localCatalog } from "../data/catalog";
 import { extractMalId, findAnime } from "../utils/recommendation";
 
@@ -146,5 +146,9 @@ export class CatalogApiProvider implements AnimeProvider {
     } finally {
       window.clearTimeout(timeout);
     }
+  }
+
+  async getVectorSimilar(animeId: number, limit: number) {
+    return fetchJson<VectorSimilarAnimeResponse>(`${this.baseUrl}/api/vector-similar?animeId=${animeId}&limit=${limit}`, 12000);
   }
 }

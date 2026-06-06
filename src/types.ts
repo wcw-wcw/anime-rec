@@ -71,6 +71,34 @@ export interface Recommendation {
   reasons: string[];
   breakdown: SimilarityBreakdown;
   explanation: RecommendationExplanation;
+  mode?: RecommendationMode;
+  metadataScore?: number;
+  vectorSimilarity?: number;
+  hybridScore?: number;
+  showMetadataFactors?: boolean;
+}
+
+export type RecommendationMode = "metadata" | "semantic" | "hybrid";
+
+export interface VectorSimilarAnimeResult {
+  anime: Anime;
+  vectorDistance?: number;
+  vectorSimilarity: number;
+}
+
+export interface VectorSimilarAnimeResponse {
+  source: Pick<Anime, "id" | "malId" | "title">;
+  embeddingModel: string;
+  scoreType: "vector_semantic_similarity";
+  limit: number;
+  similar: VectorSimilarAnimeResult[];
+}
+
+export interface HybridRecommendationResult extends Recommendation {
+  mode: "hybrid";
+  metadataScore: number;
+  vectorSimilarity: number;
+  hybridScore: number;
 }
 
 export type RecommendationSortMode = "similarity_desc" | "score_desc" | "popularity_asc" | "year_desc" | "title_asc";

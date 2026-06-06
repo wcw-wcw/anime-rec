@@ -1,5 +1,6 @@
 import type {
   Anime,
+  HybridRecommendationResult,
   Recommendation,
   RecommendationExplanation,
   RecommendationFactor,
@@ -7,6 +8,7 @@ import type {
   RecommendationSortMode,
   SearchMatch,
   SimilarityBreakdown,
+  VectorSimilarAnimeResult,
 } from "../types";
 
 const STOP_WORDS = new Set([
@@ -65,6 +67,20 @@ const setSimilarity = (left: string[], right: string[]) => {
 const textSimilarity = (left: string, right: string) => setSimilarity(tokenize(left), tokenize(right));
 
 const clamp01 = (value: number) => (Number.isFinite(value) ? Math.min(1, Math.max(0, value)) : 0);
+
+const emptyBreakdown = (): SimilarityBreakdown => ({
+  genres: 0,
+  themes: 0,
+  synopsis: 0,
+  title: 0,
+  metadata: 0,
+  demographics: 0,
+  studios: 0,
+  format: 0,
+  year: 0,
+  score: 0,
+  popularity: 0,
+});
 
 const sharedValues = (left: string[] | undefined, right: string[] | undefined) => {
   const targetValues = new Set((left ?? []).map(normalize));
@@ -380,6 +396,9 @@ export const recommendAnime = (target: Anime, catalog: Anime[], count: number): 
         reasons: explanation.topReasons,
         breakdown,
         explanation,
+        mode: "metadata" as const,
+        metadataScore: score,
+        showMetadataFactors: true,
       };
     })
     .sort((left, right) => right.score - left.score)
@@ -390,6 +409,106 @@ export const recommendAnime = (target: Anime, catalog: Anime[], count: number): 
       return true;
     })
     .slice(0, count);
+};
+
+const resultKey = (anime: Anime) => String(anime.malId ?? anime.id);
+
+const normalizeVectorScore = (value: number) => {
+  if (!Number.isFinite(value)) return 0;
+  return clamp01(value > 1 ? value / 100 : value);
+};
+
+const semanticExplanation = (score: number): RecommendationExplanation => ({
+  totalScore: score,
+  summary: "Matched through synopsis and metadata embedding similarity.",
+  factorBreakdown: [],
+  matchedGenres: [],
+  matchedThemes: [],
+  matchedDemographics: [],
+  matchedStudios: [],
+  formatMatch: false,
+  yearCloseness: 0,
+  scoreCloseness: 0,
+  popularityCloseness: 0,
+  synopsisSimilarity: 0,
+  titleSimilarity: 0,
+  topReasons: [`Semantic similarity: ${formatSimilarityScore(score)}`],
+});
+
+export const vectorResultsToRecommendations = (vectorResults: VectorSimilarAnimeResult[]): Recommendation[] =>
+  vectorResults
+    .map((result) => {
+      const vectorSimilarity = normalizeVectorScore(result.vectorSimilarity);
+      const explanation = semanticExplanation(vectorSimilarity);
+      return {
+        anime: result.anime,
+        score: vectorSimilarity,
+        cluster: "Semantic neighbors",
+        reasons: explanation.topReasons,
+        breakdown: emptyBreakdown(),
+        explanation,
+        mode: "semantic" as const,
+        vectorSimilarity,
+        showMetadataFactors: false,
+      };
+    })
+    .sort((left, right) => right.score - left.score);
+
+export const computeHybridScore = (metadataScore: number | undefined, vectorSimilarity: number | undefined) =>
+  clamp01(clamp01(metadataScore ?? 0) * 0.65 + clamp01(vectorSimilarity ?? 0) * 0.35);
+
+export const mergeMetadataAndVectorRecommendations = (
+  metadataResults: Recommendation[],
+  vectorResults: Recommendation[] | VectorSimilarAnimeResult[],
+): HybridRecommendationResult[] => {
+  const metadataByKey = new Map(metadataResults.map((result) => [resultKey(result.anime), result]));
+  const semanticResults = vectorResultsToRecommendations(
+    vectorResults.map((result) =>
+      "vectorSimilarity" in result && "cluster" in result
+        ? { anime: result.anime, vectorSimilarity: result.vectorSimilarity ?? result.score }
+        : (result as VectorSimilarAnimeResult),
+    ),
+  );
+  const semanticByKey = new Map(semanticResults.map((result) => [resultKey(result.anime), result]));
+  const keys = new Set([...metadataByKey.keys(), ...semanticByKey.keys()]);
+
+  return [...keys]
+    .flatMap((key): HybridRecommendationResult[] => {
+      const metadata = metadataByKey.get(key);
+      const semantic = semanticByKey.get(key);
+      const metadataScore = metadata?.metadataScore ?? metadata?.score ?? 0;
+      const vectorSimilarity = semantic?.vectorSimilarity ?? 0;
+      const hybridScore = computeHybridScore(metadataScore, vectorSimilarity);
+      const base = metadata ?? semantic;
+      if (!base) return [];
+
+      const semanticReason = `Semantic similarity: ${formatSimilarityScore(vectorSimilarity)}`;
+      const topReasons = [...(metadata?.explanation.topReasons ?? metadata?.reasons ?? []), semanticReason].filter(Boolean);
+      const explanation: RecommendationExplanation = {
+        ...(metadata?.explanation ?? semanticExplanation(vectorSimilarity)),
+        totalScore: hybridScore,
+        summary: metadata
+          ? `${metadata.explanation.summary} Embedding similarity contributes ${formatSimilarityScore(vectorSimilarity)}.`
+          : "Strong semantic neighbor from stored embedding similarity; metadata match score was not available in the local catalog.",
+        topReasons: topReasons.length ? topReasons.slice(0, 4) : [semanticReason],
+      };
+
+      const result: HybridRecommendationResult = {
+        ...base,
+        score: hybridScore,
+        cluster: metadata?.cluster ?? "Semantic neighbors",
+        reasons: explanation.topReasons,
+        breakdown: metadata?.breakdown ?? emptyBreakdown(),
+        explanation,
+        mode: "hybrid" as const,
+        metadataScore: clamp01(metadataScore),
+        vectorSimilarity,
+        hybridScore,
+        showMetadataFactors: Boolean(metadata),
+      };
+      return [result];
+    })
+    .sort((left, right) => right.score - left.score);
 };
 
 const cleanNumber = (value: number | undefined) => (typeof value === "number" && Number.isFinite(value) ? value : undefined);

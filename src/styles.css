@@ -541,6 +541,32 @@ a {
   background: #fffefa;
 }
 
+.mode-control {
+  display: inline-flex;
+  flex: 0 0 auto;
+  gap: 4px;
+  padding: 4px;
+  border: 1px solid rgba(22, 32, 42, 0.12);
+  border-radius: 8px;
+  background: #f2efe7;
+}
+
+.mode-control button {
+  min-height: 34px;
+  padding: 0 10px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: #42505c;
+  font-size: 0.78rem;
+  font-weight: 900;
+}
+
+.mode-control button.active {
+  background: #25766f;
+  color: #ffffff;
+}
+
 .recommendation-toolbar > span {
   color: #596673;
   font-size: 0.86rem;
@@ -566,6 +592,28 @@ a {
 
 .recommendation-empty {
   margin: 18px 0 0;
+}
+
+.semantic-status {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  min-height: 44px;
+  margin: 0 0 16px;
+  padding: 10px 12px;
+  border: 1px solid rgba(22, 32, 42, 0.1);
+  border-radius: 8px;
+  color: #33414e;
+  font-size: 0.88rem;
+  font-weight: 800;
+}
+
+.semantic-loading {
+  background: #e8f0ff;
+}
+
+.semantic-error {
+  background: #ffe9e6;
 }
 
 .catalog-count,
@@ -743,6 +791,22 @@ a {
   padding: 9px;
   border-radius: 8px;
   background: #f7f4ed;
+}
+
+.score-chip-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.score-chip-list span {
+  min-height: 26px;
+  padding: 5px 8px;
+  border-radius: 999px;
+  background: #edf3f4;
+  color: #33414e;
+  font-size: 0.72rem;
+  font-weight: 900;
 }
 
 .factor-row {
@@ -1457,6 +1521,14 @@ a {
   .recommendation-toolbar label {
     justify-content: space-between;
     width: 100%;
+  }
+
+  .mode-control {
+    width: 100%;
+  }
+
+  .mode-control button {
+    flex: 1;
   }
 
   .recommendation-toolbar select {

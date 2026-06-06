@@ -1,8 +1,8 @@
 import { FormEvent, useEffect, useMemo, useState } from "react";
-import { ArrowLeft, Calendar, ExternalLink, Gauge, ImageOff, Info, Library, LinkIcon, Search, SlidersHorizontal, Sparkles, Star } from "lucide-react";
+import { ArrowLeft, Brain, Calendar, ExternalLink, Gauge, ImageOff, Info, Library, LinkIcon, Search, SlidersHorizontal, Sparkles, Star } from "lucide-react";
 import { localCatalog } from "./data/catalog";
 import { CatalogApiProvider, JikanProvider, LocalCatalogProvider } from "./services/animeProvider";
-import type { Anime, Recommendation, RecommendationFilters, RecommendationSortMode } from "./types";
+import type { Anime, Recommendation, RecommendationFilters, RecommendationMode, RecommendationSortMode } from "./types";
 import {
   filterAnimeCatalog,
   formatAnimeMetadata,
@@ -25,9 +25,12 @@ import {
   formatSimilarityScore,
   hasActiveRecommendationFilters,
   matchStrength,
+  mergeMetadataAndVectorRecommendations,
   recommendAnime,
+  relativePercent,
   sortRecommendationResults,
   strengthTone,
+  vectorResultsToRecommendations,
 } from "./utils/recommendation";
 
 const localProvider = new LocalCatalogProvider();
@@ -50,18 +53,23 @@ const defaultCatalogFilters: CatalogFilters = {
 
 const defaultRecommendationFilters = clearRecommendationFilters();
 const recommendationFormatOptions = ["TV", "Movie"];
+const recommendationModeOptions: Array<{ value: RecommendationMode; label: string }> = [
+  { value: "metadata", label: "Metadata" },
+  { value: "semantic", label: "Semantic" },
+  { value: "hybrid", label: "Hybrid" },
+];
 
 const SourcePill = ({ source }: { source: Anime["source"] }) => (
   <span className={`source source-${source}`}>{source === "mal" ? "MAL" : source === "jikan" ? "Jikan" : "Local"}</span>
 );
 
-const FactorBar = ({ label, value }: { label: string; value: number }) => (
+const FactorBar = ({ label, value, displayPercent }: { label: string; value: number; displayPercent?: number }) => (
   <div className="factor-row">
     <span>{label}</span>
     <div className="factor-track">
-      <span style={{ width: `${factorPercent(value)}%` }} />
+      <span style={{ width: `${displayPercent ?? factorPercent(value)}%` }} />
     </div>
-    <strong>{factorPercent(value)}</strong>
+    <strong>{displayPercent ?? factorPercent(value)}</strong>
   </div>
 );
 
@@ -72,7 +80,7 @@ const RecommendationReasons = ({ rec }: { rec: Recommendation }) => {
     <div className="recommendation-explanation">
       <div className="explanation-heading">
         <span>Why this matches</span>
-        <strong>{formatSimilarityScore(rec.explanation.totalScore)} similar</strong>
+        <strong>{formatSimilarityScore(rec.explanation.totalScore)} {rec.mode === "semantic" ? "semantic" : rec.mode === "hybrid" ? "hybrid" : "similar"}</strong>
       </div>
       <p>{rec.explanation.summary}</p>
       <div className="reason-list">
@@ -83,6 +91,14 @@ const RecommendationReasons = ({ rec }: { rec: Recommendation }) => {
     </div>
   );
 };
+
+const RecommendationScoreList = ({ rec }: { rec: Recommendation }) => (
+  <div className="score-chip-list" aria-label="Recommendation scores">
+    {rec.metadataScore !== undefined && <span>Metadata {formatSimilarityScore(rec.metadataScore)}</span>}
+    {rec.vectorSimilarity !== undefined && <span>Semantic {formatSimilarityScore(rec.vectorSimilarity)}</span>}
+    {rec.hybridScore !== undefined && <span>Hybrid {formatSimilarityScore(rec.hybridScore)}</span>}
+  </div>
+);
 
 const EmptyState = () => (
   <section className="empty-state">
@@ -134,11 +150,15 @@ export function App() {
   const [catalogSort, setCatalogSort] = useState<CatalogSortMode>("popularity");
   const [recommendationFilters, setRecommendationFilters] = useState<RecommendationFilters>(defaultRecommendationFilters);
   const [recommendationSort, setRecommendationSort] = useState<RecommendationSortMode>("similarity_desc");
+  const [recommendationMode, setRecommendationMode] = useState<RecommendationMode>("metadata");
   const [isFilterOpen, setIsFilterOpen] = useState(false);
   const [selected, setSelected] = useState<Anime | null>(defaultAnime);
-  const [recommendations, setRecommendations] = useState<Recommendation[]>(() =>
+  const [metadataRecommendations, setMetadataRecommendations] = useState<Recommendation[]>(() =>
     defaultAnime ? recommendAnime(defaultAnime, localCatalog, localCatalog.length) : [],
   );
+  const [semanticRecommendations, setSemanticRecommendations] = useState<Recommendation[]>([]);
+  const [semanticState, setSemanticState] = useState<"idle" | "loading" | "ready" | "error">("idle");
+  const [semanticMessage, setSemanticMessage] = useState("");
   const [selectedDetailAnime, setSelectedDetailAnime] = useState<Anime | null>(null);
   const [lookupState, setLookupState] = useState<"idle" | "loading" | "ready" | "error">("ready");
   const [message, setMessage] = useState("Using local catalog data. Start the local API to fetch and store missing MAL entries.");
@@ -162,7 +182,9 @@ export function App() {
         const refreshedDefault = findAnime(query, remoteCatalog)[0]?.anime;
         if (refreshedDefault) {
           setSelected(refreshedDefault);
-          setRecommendations(recommendAnime(refreshedDefault, remoteCatalog, remoteCatalog.length));
+          setMetadataRecommendations(recommendAnime(refreshedDefault, remoteCatalog, remoteCatalog.length));
+          setSemanticRecommendations([]);
+          setSemanticState("idle");
         }
         setMessage(`Loaded ${remoteCatalog.length} anime from local JSON storage.`);
         setCatalogLoadState("ready");
@@ -178,6 +200,15 @@ export function App() {
   const formats = useMemo(() => getUniqueFormats(catalog), [catalog]);
   const years = useMemo(() => getUniqueYears(catalog), [catalog]);
   const catalogResults = useMemo(() => sortAnimeCatalog(filterAnimeCatalog(catalog, catalogFilters), catalogSort), [catalog, catalogFilters, catalogSort]);
+  const hybridRecommendations = useMemo(
+    () => mergeMetadataAndVectorRecommendations(metadataRecommendations, semanticRecommendations),
+    [metadataRecommendations, semanticRecommendations],
+  );
+  const recommendations = useMemo(() => {
+    if (recommendationMode === "semantic") return semanticRecommendations;
+    if (recommendationMode === "hybrid") return semanticRecommendations.length ? hybridRecommendations : metadataRecommendations;
+    return metadataRecommendations;
+  }, [hybridRecommendations, metadataRecommendations, recommendationMode, semanticRecommendations]);
   const filteredRecommendationPool = useMemo(() => applyRecommendationFilters(recommendations, recommendationFilters), [recommendations, recommendationFilters]);
   const sortedRecommendationPool = useMemo(
     () => sortRecommendationResults(filteredRecommendationPool, recommendationSort),
@@ -210,6 +241,42 @@ export function App() {
     }, {});
   }, [visibleRecommendations]);
   const topScore = visibleRecommendations.reduce((max, rec) => Math.max(max, rec.score), 0);
+  const topSynopsisScore = visibleRecommendations.reduce((max, rec) => Math.max(max, rec.breakdown.synopsis), 0);
+
+  useEffect(() => {
+    if (!selected || recommendationMode === "metadata") return;
+
+    const animeId = selected.malId ?? selected.id;
+    if (!animeId) {
+      setSemanticState("error");
+      setSemanticMessage("Semantic similarity is unavailable. Metadata recommendations are still available.");
+      return;
+    }
+
+    let active = true;
+    setSemanticState("loading");
+    setSemanticMessage("");
+
+    apiProvider
+      .getVectorSimilar(animeId, Math.max(count, 20))
+      .then((response) => {
+        if (!active) return;
+        setSemanticRecommendations(vectorResultsToRecommendations(response.similar ?? []));
+        setSemanticState("ready");
+        setSemanticMessage("");
+      })
+      .catch(() => {
+        if (!active) return;
+        setSemanticRecommendations([]);
+        setSemanticState("error");
+        setSemanticMessage("Semantic similarity is unavailable. Metadata recommendations are still available.");
+      });
+
+    return () => {
+      active = false;
+    };
+  }, [count, recommendationMode, selected]);
+
   const runRecommendation = async (event?: FormEvent) => {
     event?.preventDefault();
     setLookupState("loading");
@@ -264,7 +331,9 @@ export function App() {
 
       const mergedCatalog = [target, ...activeCatalog.filter((anime) => anime.malId !== target?.malId && anime.id !== target?.id)];
       setSelected(target);
-      setRecommendations(recommendAnime(target, mergedCatalog, mergedCatalog.length));
+      setMetadataRecommendations(recommendAnime(target, mergedCatalog, mergedCatalog.length));
+      setSemanticRecommendations([]);
+      setSemanticState("idle");
       setLookupState("ready");
 
       const malId = extractMalId(query);
@@ -281,7 +350,9 @@ export function App() {
       const fallback = findAnime(query, catalog)[0]?.anime;
       if (fallback) {
         setSelected(fallback);
-        setRecommendations(recommendAnime(fallback, catalog, catalog.length));
+        setMetadataRecommendations(recommendAnime(fallback, catalog, catalog.length));
+        setSemanticRecommendations([]);
+        setSemanticState("idle");
         setLookupState("ready");
         setMessage("Remote lookup was unavailable, so the app used the local catalog.");
       } else {
@@ -293,7 +364,9 @@ export function App() {
   const pickSuggestion = (anime: Anime) => {
     setQuery(titleFor(anime));
     setSelected(anime);
-    setRecommendations(recommendAnime(anime, catalog, catalog.length));
+    setMetadataRecommendations(recommendAnime(anime, catalog, catalog.length));
+    setSemanticRecommendations([]);
+    setSemanticState("idle");
     setProviderName(localProvider.name);
     setLookupState("ready");
     setMessage(`Matched ${titleFor(anime)} from local storage.`);
@@ -320,7 +393,9 @@ export function App() {
     const title = titleFor(anime);
     setQuery(title);
     setSelected(anime);
-    setRecommendations(recommendAnime(anime, catalog, catalog.length));
+    setMetadataRecommendations(recommendAnime(anime, catalog, catalog.length));
+    setSemanticRecommendations([]);
+    setSemanticState("idle");
     setProviderName(localProvider.name);
     setLookupState("ready");
     setActiveView("recommend");
@@ -342,7 +417,9 @@ export function App() {
     const comparisonCatalog = [anime, ...catalog.filter((item) => item.id !== anime.id && item.malId !== anime.malId)];
     setQuery(title);
     setSelected(anime);
-    setRecommendations(recommendAnime(anime, comparisonCatalog, comparisonCatalog.length));
+    setMetadataRecommendations(recommendAnime(anime, comparisonCatalog, comparisonCatalog.length));
+    setSemanticRecommendations([]);
+    setSemanticState("idle");
     setProviderName(localProvider.name);
     setLookupState("ready");
     setActiveView("recommend");
@@ -823,21 +900,55 @@ export function App() {
             <div className="score-explainer">
               <div>
                 <h3>How matches are scored</h3>
-                <p>
-                  Ranking uses MAL genres, available theme and demographic tags, metadata, title wording, and a local TF-IDF comparison of MAL synopses. These explanations show the strongest deterministic metadata reasons for each match; they are not AI or embedding judgments.
-                </p>
+                {recommendationMode === "metadata" ? (
+                  <p>
+                    Ranking uses MAL genres, available theme and demographic tags, metadata, title wording, and a local TF-IDF comparison of MAL synopses. These explanations show the strongest deterministic metadata reasons for each match; they are not AI or embedding judgments.
+                  </p>
+                ) : recommendationMode === "semantic" ? (
+                  <p>
+                    Ranking uses stored pgvector nearest neighbors from server-side anime embeddings. The browser does not receive raw embeddings or see database details.
+                  </p>
+                ) : (
+                  <p>
+                    Ranking blends the current explainable metadata score with stored semantic similarity. Metadata reasons remain deterministic, and semantic scores come from server-side embedding neighbors.
+                  </p>
+                )}
               </div>
-              <div className="weight-list" aria-label="Similarity factor weights">
-                <span><strong>34%</strong> genres</span>
-                <span><strong>24%</strong> themes and audience</span>
-                <span><strong>23%</strong> synopsis similarity</span>
-                <span><strong>14%</strong> format/year/studio</span>
-                <span><strong>5%</strong> title</span>
-              </div>
+              {recommendationMode === "metadata" ? (
+                <div className="weight-list" aria-label="Similarity factor weights">
+                  <span><strong>34%</strong> genres</span>
+                  <span><strong>24%</strong> themes and audience</span>
+                  <span><strong>23%</strong> synopsis similarity</span>
+                  <span><strong>14%</strong> format/year/studio</span>
+                  <span><strong>5%</strong> title</span>
+                </div>
+              ) : recommendationMode === "hybrid" ? (
+                <div className="weight-list" aria-label="Hybrid factor weights">
+                  <span><strong>65%</strong> metadata</span>
+                  <span><strong>35%</strong> semantic</span>
+                </div>
+              ) : (
+                <div className="weight-list" aria-label="Semantic factor weights">
+                  <span><strong>100%</strong> semantic</span>
+                  <span><strong>pgvector</strong> nearest</span>
+                </div>
+              )}
             </div>
 
             <div className="recommendation-toolbar">
-              <span>{hasActiveRecommendationFilters(recommendationFilters) ? `${filteredRecommendationPool.length} filtered matches` : `${recommendations.length} candidate matches`}</span>
+              <div className="mode-control" aria-label="Recommendation mode">
+                {recommendationModeOptions.map((option) => (
+                  <button
+                    key={option.value}
+                    type="button"
+                    className={recommendationMode === option.value ? "active" : ""}
+                    onClick={() => setRecommendationMode(option.value)}
+                  >
+                    {option.label}
+                  </button>
+                ))}
+              </div>
+              <span>{hasActiveRecommendationFilters(recommendationFilters) ? `${visibleRecommendations.length} filtered recommendations` : `${visibleRecommendations.length} recommendations`}</span>
               <label>
                 Sort
                 <select value={recommendationSort} onChange={(event) => setRecommendationSort(event.target.value as RecommendationSortMode)}>
@@ -847,6 +958,20 @@ export function App() {
                 </select>
               </label>
             </div>
+
+            {recommendationMode !== "metadata" && semanticState === "loading" && (
+              <section className="semantic-status semantic-loading">
+                <Brain size={18} />
+                <span>Loading semantic similarity from stored embeddings.</span>
+              </section>
+            )}
+
+            {recommendationMode !== "metadata" && semanticState === "error" && (
+              <section className="semantic-status semantic-error">
+                <Brain size={18} />
+                <span>{semanticMessage || "Semantic similarity is unavailable. Metadata recommendations are still available."}</span>
+              </section>
+            )}
 
             {visibleRecommendations.length === 0 ? (
               <section className="empty-state catalog-state recommendation-empty">
@@ -899,18 +1024,21 @@ export function App() {
                               <div className="card-topline">
                                 <SourcePill source={rec.anime.source} />
                                 <span className={`match-pill match-${strengthTone(matchStrength(rec.score, topScore))}`}>
-                                  {matchStrength(rec.score, topScore)} match
+                                  {formatSimilarityScore(rec.score)} {rec.mode === "semantic" ? "semantic" : rec.mode === "hybrid" ? "hybrid" : "match"}
                                 </span>
                               </div>
                               <h4>{titleFor(rec.anime)}</h4>
                               <p>{rec.anime.synopsis}</p>
+                              <RecommendationScoreList rec={rec} />
                               <RecommendationReasons rec={rec} />
-                              <div className="factor-list">
-                                <FactorBar label="Genres" value={rec.breakdown.genres} />
-                                <FactorBar label="Synopsis" value={rec.breakdown.synopsis} />
-                                <FactorBar label="Format" value={rec.breakdown.format} />
-                                <FactorBar label="Score" value={Math.max(rec.breakdown.score, rec.breakdown.popularity)} />
-                              </div>
+                              {rec.showMetadataFactors !== false && (
+                                <div className="factor-list">
+                                  <FactorBar label="Genres" value={rec.breakdown.genres} />
+                                  <FactorBar label="Synopsis" value={rec.breakdown.synopsis} displayPercent={relativePercent(rec.breakdown.synopsis, topSynopsisScore)} />
+                                  <FactorBar label="Format" value={rec.breakdown.format} />
+                                  <FactorBar label="Score" value={Math.max(rec.breakdown.score, rec.breakdown.popularity)} />
+                                </div>
+                              )}
                               <div className="detail-card-actions">
                                 <button type="button" className="secondary-button" onClick={() => openAnimeDetail(rec.anime)}>
                                   <Info size={15} />
