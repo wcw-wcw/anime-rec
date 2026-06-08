@@ -46,7 +46,6 @@ export default async function handler(request, response) {
 
     response.status(200).json({
       source: result.source,
-      embeddingModel,
       scoreType: "vector_semantic_similarity",
       limit,
       similar: result.similar,

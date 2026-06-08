@@ -91,7 +91,6 @@ const server = http.createServer(async (request, response) => {
 
       sendJson(response, 200, {
         source: result.source,
-        embeddingModel,
         scoreType: "vector_semantic_similarity",
         limit,
         similar: result.similar,

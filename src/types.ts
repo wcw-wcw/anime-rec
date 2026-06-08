@@ -109,7 +109,6 @@ export interface VectorSimilarAnimeResult {
 
 export interface VectorSimilarAnimeResponse {
   source: Pick<Anime, "id" | "malId" | "title">;
-  embeddingModel: string;
   scoreType: "vector_semantic_similarity";
   limit: number;
   similar: VectorSimilarAnimeResult[];

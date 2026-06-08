@@ -1,5 +1,5 @@
 import { FormEvent, useEffect, useMemo, useState } from "react";
-import { ArrowLeft, Brain, Calendar, ExternalLink, Gauge, ImageOff, Info, Library, LinkIcon, Network, Search, SlidersHorizontal, Sparkles, Star } from "lucide-react";
+import { ArrowLeft, Brain, Calendar, ExternalLink, Gauge, ImageOff, Info, Library, LinkIcon, Moon, Network, Search, SlidersHorizontal, Sparkles, Star, Sun } from "lucide-react";
 import { localCatalog } from "./data/catalog";
 import { CatalogApiProvider, JikanProvider, LocalCatalogProvider } from "./services/animeProvider";
 import type { Anime, Recommendation, RecommendationFilters, RecommendationGraphData, RecommendationMode, RecommendationSortMode } from "./types";
@@ -59,6 +59,7 @@ const recommendationModeOptions: Array<{ value: RecommendationMode; label: strin
   { value: "hybrid", label: "Hybrid" },
 ];
 const graphSizeOptions = [5, 8, 12];
+type ThemeMode = "light" | "dark";
 
 const clampPercentScore = (value: number | undefined) => {
   if (!Number.isFinite(value)) return 0;
@@ -209,9 +210,9 @@ const RecommendationNetwork = ({
   );
   const recommendationNodes = graph.nodes.filter((node) => node.role === "recommendation");
   const sourceNode = graph.nodes.find((node) => node.role === "source");
-  const center = { x: 450, y: 172 };
-  const radiusX = 318;
-  const radiusY = 112;
+  const center = { x: 450, y: 230 };
+  const radiusX = 350;
+  const radiusY = 154;
   const nodePositions = new Map<string, { x: number; y: number }>();
 
   recommendationNodes.forEach((node, index) => {
@@ -250,7 +251,7 @@ const RecommendationNetwork = ({
         </div>
       ) : (
         <div className="network-canvas">
-          <svg className="network-svg" viewBox="0 0 900 344" role="img" aria-label={`${titleFor(source)} connected to ${recommendationNodes.length} recommendations`}>
+          <svg className="network-svg" viewBox="0 0 900 460" role="img" aria-label={`${titleFor(source)} connected to ${recommendationNodes.length} recommendations`}>
             <defs>
               <marker id="edge-dot" markerWidth="7" markerHeight="7" refX="3.5" refY="3.5">
                 <circle cx="3.5" cy="3.5" r="2.5" fill="#25766f" />
@@ -281,7 +282,7 @@ const RecommendationNetwork = ({
             })}
           </svg>
 
-          <div className="network-source-node" style={{ left: `${(center.x / 900) * 100}%`, top: `${(center.y / 344) * 100}%` }}>
+          <div className="network-source-node" style={{ left: `${(center.x / 900) * 100}%`, top: `${(center.y / 460) * 100}%` }}>
             <AnimePoster anime={source} />
             <span>{titleFor(source)}</span>
           </div>
@@ -295,7 +296,7 @@ const RecommendationNetwork = ({
                 key={node.id}
                 type="button"
                 className="network-rec-node"
-                style={{ left: `${(position.x / 900) * 100}%`, top: `${(position.y / 344) * 100}%` }}
+                style={{ left: `${(position.x / 900) * 100}%`, top: `${(position.y / 460) * 100}%` }}
                 onClick={() => onPickRecommendation(node.anime)}
                 title={`Recommend from ${titleFor(node.anime)}`}
               >
@@ -325,6 +326,10 @@ const ChipList = ({ items, emptyLabel = "Unknown" }: { items: string[] | undefin
 };
 
 export function App() {
+  const [theme, setTheme] = useState<ThemeMode>(() => {
+    if (typeof window === "undefined") return "light";
+    return window.localStorage.getItem("animerec-theme") === "dark" ? "dark" : "light";
+  });
   const [activeView, setActiveView] = useState<ActiveView>("recommend");
   const [detailBackView, setDetailBackView] = useState<Exclude<ActiveView, "detail">>("catalog");
   const [query, setQuery] = useState(defaultQuery);
@@ -349,6 +354,10 @@ export function App() {
   const [lookupState, setLookupState] = useState<"idle" | "loading" | "ready" | "error">("ready");
   const [message, setMessage] = useState("Using local catalog data. Start the local API to fetch and store missing MAL entries.");
   const [providerName, setProviderName] = useState(localProvider.name);
+
+  useEffect(() => {
+    window.localStorage.setItem("animerec-theme", theme);
+  }, [theme]);
 
   useEffect(() => {
     localProvider.setCatalog(catalog);
@@ -429,6 +438,21 @@ export function App() {
   const topScore = visibleRecommendations.reduce((max, rec) => Math.max(max, rec.score), 0);
   const topSynopsisScore = visibleRecommendations.reduce((max, rec) => Math.max(max, rec.breakdown.synopsis), 0);
   const isRecommendationGraphLoading = recommendationMode !== "metadata" && semanticState === "loading";
+  const recommendationEmptyCopy =
+    recommendationMode === "semantic" && semanticState === "error"
+      ? {
+          title: "Semantic recommendations are unavailable.",
+          body: "The pgvector service is not responding right now. Switch to Metadata to keep exploring with local similarity.",
+        }
+      : hasActiveRecommendationFilters(recommendationFilters)
+        ? {
+            title: "No recommendations match these filters.",
+            body: "Try widening the score range, changing format, or clearing the year filters.",
+          }
+        : {
+            title: "No recommendation results yet.",
+            body: "Try another anime with more catalog metadata, or switch modes if Semantic data is unavailable.",
+          };
 
   useEffect(() => {
     if (!selected || recommendationMode === "metadata") return;
@@ -436,7 +460,7 @@ export function App() {
     const animeId = selected.malId ?? selected.id;
     if (!animeId) {
       setSemanticState("error");
-      setSemanticMessage("Semantic similarity is unavailable. Metadata recommendations are still available.");
+      setSemanticMessage("Semantic similarity is unavailable because this title has no stored pgvector entry. Metadata recommendations are still available.");
       return;
     }
 
@@ -456,7 +480,7 @@ export function App() {
         if (!active) return;
         setSemanticRecommendations([]);
         setSemanticState("error");
-        setSemanticMessage("Semantic similarity is unavailable. Metadata recommendations are still available.");
+        setSemanticMessage("Semantic similarity is unavailable right now. Metadata recommendations are still available.");
       });
 
     return () => {
@@ -614,7 +638,7 @@ export function App() {
   };
 
   return (
-    <main className="app-shell">
+    <main className="app-shell" data-theme={theme}>
       <nav className="app-nav" aria-label="Primary">
         <button type="button" className={activeView === "recommend" || (activeView === "detail" && detailBackView === "recommend") ? "active" : ""} onClick={() => setActiveView("recommend")}>
           <Sparkles size={17} />
@@ -623,6 +647,16 @@ export function App() {
         <button type="button" className={activeView === "catalog" || (activeView === "detail" && detailBackView === "catalog") ? "active" : ""} onClick={() => setActiveView("catalog")}>
           <Library size={17} />
           Catalog
+        </button>
+        <button
+          type="button"
+          className="theme-toggle"
+          onClick={() => setTheme((current) => (current === "dark" ? "light" : "dark"))}
+          aria-pressed={theme === "dark"}
+          title={theme === "dark" ? "Use light theme" : "Use dark theme"}
+        >
+          {theme === "dark" ? <Sun size={17} /> : <Moon size={17} />}
+          {theme === "dark" ? "Light" : "Dark"}
         </button>
       </nav>
 
@@ -889,7 +923,7 @@ export function App() {
                           </button>
                           <button type="button" className="primary-button" onClick={() => recommendFromAnime(rec.anime)}>
                             <Sparkles size={15} />
-                            Recommend
+                            Recommend from this
                           </button>
                         </div>
                       </div>
@@ -1038,7 +1072,7 @@ export function App() {
                       </button>
                       <button type="button" className="primary-button" onClick={() => recommendFromCatalog(anime)}>
                         <Sparkles size={16} />
-                        Recommend
+                        Recommend from this
                       </button>
                     </div>
                   </div>
@@ -1156,15 +1190,15 @@ export function App() {
             {recommendationMode !== "metadata" && semanticState === "error" && (
               <section className="semantic-status semantic-error">
                 <Brain size={18} />
-                <span>{semanticMessage || "Semantic similarity is unavailable. Metadata recommendations are still available."}</span>
+                <span>{semanticMessage || "Semantic similarity is unavailable right now. Metadata recommendations are still available."}</span>
               </section>
             )}
 
             {visibleRecommendations.length === 0 ? (
               <section className="empty-state catalog-state recommendation-empty">
                 <Search size={24} />
-                <h2>No recommendations match these filters.</h2>
-                <p>Try widening the score range, changing format, or clearing the year filters.</p>
+                <h2>{recommendationEmptyCopy.title}</h2>
+                <p>{recommendationEmptyCopy.body}</p>
               </section>
             ) : (
               <>
@@ -1212,7 +1246,7 @@ export function App() {
                                 </button>
                                 <button type="button" className="primary-button" onClick={() => recommendFromAnime(rec.anime)}>
                                   <Sparkles size={15} />
-                                  Recommend
+                                  Recommend from this
                                 </button>
                               </div>
                               {rec.anime.malId && (

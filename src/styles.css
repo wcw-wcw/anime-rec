@@ -16,6 +16,7 @@ body {
   margin: 0;
   min-width: 320px;
   min-height: 100vh;
+  overflow-x: hidden;
 }
 
 button,
@@ -35,6 +36,8 @@ a {
 .app-shell {
   min-height: 100vh;
   padding: 28px;
+  background: #f7f5ef;
+  color: #16202a;
 }
 
 .app-nav {
@@ -62,6 +65,10 @@ a {
   border-color: #d95757;
   background: #d95757;
   color: #ffffff;
+}
+
+.app-nav .theme-toggle {
+  margin-left: auto;
 }
 
 .hero {
@@ -704,9 +711,10 @@ a {
 
 .network-canvas {
   position: relative;
-  width: 760px;
+  width: 100%;
+  min-width: 900px;
   max-width: none;
-  height: 344px;
+  height: 460px;
   overflow: hidden;
   background:
     linear-gradient(rgba(22, 32, 42, 0.055) 1px, transparent 1px),
@@ -740,7 +748,7 @@ a {
   stroke: rgba(255, 254, 250, 0.96);
   stroke-width: 6px;
   fill: #33414e;
-  font-size: 17px;
+  font-size: 12px;
   font-weight: 900;
   dominant-baseline: middle;
   text-anchor: middle;
@@ -754,7 +762,7 @@ a {
   display: grid;
   justify-items: center;
   gap: 5px;
-  width: 128px;
+  width: 136px;
   border-radius: 8px;
   text-align: center;
 }
@@ -1566,6 +1574,10 @@ a {
     flex-direction: column;
   }
 
+  .app-nav .theme-toggle {
+    margin-left: 0;
+  }
+
   .app-nav button {
     justify-content: center;
   }
@@ -1614,9 +1626,13 @@ a {
   }
 
   .filter-popover {
-    right: auto;
-    left: 0;
-    width: min(330px, calc(100vw - 32px));
+    position: fixed;
+    top: 112px;
+    right: 16px;
+    left: 16px;
+    width: auto;
+    max-height: calc(100vh - 128px);
+    overflow: auto;
   }
 
   .filter-field-pair,
@@ -1661,4 +1677,187 @@ a {
   .catalog-poster {
     min-height: 230px;
   }
+}
+
+.app-shell[data-theme="dark"] {
+  background: #111820;
+  color: #e9eef2;
+}
+
+.app-shell[data-theme="dark"] .hero-copy {
+  background:
+    linear-gradient(90deg, rgba(8, 12, 17, 0.94), rgba(8, 12, 17, 0.46)),
+    url("https://cdn.myanimelist.net/images/anime/1208/94745l.jpg") center 28% / cover;
+}
+
+.app-shell[data-theme="dark"] .app-nav button,
+.app-shell[data-theme="dark"] .search-panel,
+.app-shell[data-theme="dark"] .selected-panel,
+.app-shell[data-theme="dark"] .results-panel,
+.app-shell[data-theme="dark"] .empty-state,
+.app-shell[data-theme="dark"] .catalog-tools,
+.app-shell[data-theme="dark"] .catalog-card,
+.app-shell[data-theme="dark"] .detail-poster-panel,
+.app-shell[data-theme="dark"] .detail-content,
+.app-shell[data-theme="dark"] .similar-section,
+.app-shell[data-theme="dark"] .similar-card,
+.app-shell[data-theme="dark"] .similar-card-body,
+.app-shell[data-theme="dark"] .anime-card,
+.app-shell[data-theme="dark"] .recommendation-explanation,
+.app-shell[data-theme="dark"] .network-section,
+.app-shell[data-theme="dark"] .filter-popover {
+  border-color: rgba(233, 238, 242, 0.13);
+  background: rgba(26, 36, 46, 0.96);
+  color: #e9eef2;
+  box-shadow: 0 18px 44px rgba(0, 0, 0, 0.24);
+}
+
+.app-shell[data-theme="dark"] .app-nav button {
+  background: #17222c;
+  color: #d7e1e8;
+}
+
+.app-shell[data-theme="dark"] .app-nav button.active,
+.app-shell[data-theme="dark"] .primary-button,
+.app-shell[data-theme="dark"] .primary-action,
+.app-shell[data-theme="dark"] .search-row button {
+  background: #e05f63;
+  color: #ffffff;
+}
+
+.app-shell[data-theme="dark"] .search-row,
+.app-shell[data-theme="dark"] .filter-toggle,
+.app-shell[data-theme="dark"] .filter-popover input,
+.app-shell[data-theme="dark"] .filter-popover select,
+.app-shell[data-theme="dark"] .recommendation-toolbar,
+.app-shell[data-theme="dark"] .recommendation-toolbar select,
+.app-shell[data-theme="dark"] .mode-control,
+.app-shell[data-theme="dark"] .network-size-control,
+.app-shell[data-theme="dark"] .catalog-tools select,
+.app-shell[data-theme="dark"] .catalog-search,
+.app-shell[data-theme="dark"] .secondary-button,
+.app-shell[data-theme="dark"] .secondary-action,
+.app-shell[data-theme="dark"] .back-button,
+.app-shell[data-theme="dark"] .provider-chip,
+.app-shell[data-theme="dark"] .catalog-count,
+.app-shell[data-theme="dark"] .source,
+.app-shell[data-theme="dark"] .suggestions button {
+  border-color: rgba(233, 238, 242, 0.14);
+  background: #101820;
+  color: #dce6ec;
+}
+
+.app-shell[data-theme="dark"] input,
+.app-shell[data-theme="dark"] select {
+  color: #edf3f7;
+}
+
+.app-shell[data-theme="dark"] input::placeholder {
+  color: #8ea0ad;
+}
+
+.app-shell[data-theme="dark"] h1,
+.app-shell[data-theme="dark"] h2,
+.app-shell[data-theme="dark"] h3,
+.app-shell[data-theme="dark"] h4,
+.app-shell[data-theme="dark"] .selected-copy h2,
+.app-shell[data-theme="dark"] .section-heading h2,
+.app-shell[data-theme="dark"] .empty-state h2,
+.app-shell[data-theme="dark"] .catalog-card h2,
+.app-shell[data-theme="dark"] .detail-title-block h1,
+.app-shell[data-theme="dark"] .detail-section h2,
+.app-shell[data-theme="dark"] .similar-card-body h3,
+.app-shell[data-theme="dark"] .card-body h4,
+.app-shell[data-theme="dark"] .network-heading h3,
+.app-shell[data-theme="dark"] .score-explainer h3 {
+  color: #f3f7fa;
+}
+
+.app-shell[data-theme="dark"] p,
+.app-shell[data-theme="dark"] .selected-copy p,
+.app-shell[data-theme="dark"] .anime-card p,
+.app-shell[data-theme="dark"] .empty-state p,
+.app-shell[data-theme="dark"] .catalog-card p,
+.app-shell[data-theme="dark"] .detail-section p,
+.app-shell[data-theme="dark"] .similar-card-body p,
+.app-shell[data-theme="dark"] .score-explainer p,
+.app-shell[data-theme="dark"] .recommendation-explanation p {
+  color: #aebbc5;
+}
+
+.app-shell[data-theme="dark"] .network-heading,
+.app-shell[data-theme="dark"] .score-explainer,
+.app-shell[data-theme="dark"] .factor-list,
+.app-shell[data-theme="dark"] .detail-stat-grid div,
+.app-shell[data-theme="dark"] .meta-grid span,
+.app-shell[data-theme="dark"] .weight-list span,
+.app-shell[data-theme="dark"] .catalog-stats span,
+.app-shell[data-theme="dark"] .mal-score,
+.app-shell[data-theme="dark"] .muted-chip {
+  background: #17222c;
+  color: #d9e2e8;
+}
+
+.app-shell[data-theme="dark"] .network-canvas {
+  background:
+    linear-gradient(rgba(233, 238, 242, 0.08) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(233, 238, 242, 0.08) 1px, transparent 1px),
+    #101820;
+}
+
+.app-shell[data-theme="dark"] .network-source-node,
+.app-shell[data-theme="dark"] .network-rec-node {
+  border-color: rgba(233, 238, 242, 0.17);
+  background: rgba(20, 30, 40, 0.96);
+  color: #eef4f8;
+}
+
+.app-shell[data-theme="dark"] .network-source-node span,
+.app-shell[data-theme="dark"] .network-rec-node span,
+.app-shell[data-theme="dark"] .network-edge text,
+.app-shell[data-theme="dark"] .card-topline,
+.app-shell[data-theme="dark"] .catalog-card .card-topline span:last-child,
+.app-shell[data-theme="dark"] .detail-title-block .card-topline span:last-child,
+.app-shell[data-theme="dark"] .detail-stat-grid strong,
+.app-shell[data-theme="dark"] .factor-row strong {
+  color: #edf3f7;
+  fill: #edf3f7;
+}
+
+.app-shell[data-theme="dark"] .network-edge text {
+  stroke: rgba(16, 24, 32, 0.96);
+}
+
+.app-shell[data-theme="dark"] .tag-cloud span,
+.app-shell[data-theme="dark"] .reason-list span,
+.app-shell[data-theme="dark"] .catalog-tags span,
+.app-shell[data-theme="dark"] .score-chip-list span,
+.app-shell[data-theme="dark"] .source-info-list span,
+.app-shell[data-theme="dark"] .network-rec-node strong,
+.app-shell[data-theme="dark"] .explanation-heading strong {
+  background: #20363d;
+  color: #d7eee9;
+}
+
+.app-shell[data-theme="dark"] .status-strip {
+  background: #20363d;
+  color: #dce7e4;
+}
+
+.app-shell[data-theme="dark"] .status-error,
+.app-shell[data-theme="dark"] .semantic-error {
+  background: #3b2228;
+  color: #ffd7dc;
+}
+
+.app-shell[data-theme="dark"] .semantic-loading {
+  background: #1d2e4c;
+  color: #dbe7ff;
+}
+
+.app-shell[data-theme="dark"] .poster-fallback {
+  background:
+    linear-gradient(135deg, rgba(224, 95, 99, 0.2), rgba(66, 149, 139, 0.2)),
+    #17222c;
+  color: #b7c4cb;
 }

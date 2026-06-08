@@ -1,59 +1,39 @@
 # AnimeRec
 
-A React/Vite anime recommendation prototype. It works today with a local starter catalog and is structured so MyAnimeList or Jikan data can be added without rewriting the UI or recommender.
+AnimeRec is a polished React/Vite demo for exploring anime recommendations. It combines an explainable metadata recommender with optional pgvector semantic similarity, so the same title can be explored through Metadata, Semantic, and Hybrid modes without exposing database secrets, raw vectors, or embedding internals to the browser.
 
-## What is built
+## Core features
 
 - Search by anime title or MyAnimeList anime URL.
-- Browse the loaded catalog with title/synopsis search, metadata filters, and sorting.
-- Open anime detail views with poster art, synopsis, metadata, source info, and similar recommendations.
-- Choose how many recommendations to return.
-- Local similarity engine using genres, themes, demographics, synopsis/title token overlap, format, year, and studio.
-- Metadata, Semantic, and Hybrid recommendation modes for comparing explainable rules against stored vector similarity.
-- Cluster labels for nearby groups such as battle fantasy, emotional drama, and speculative systems.
-- Provider layer for local data, Jikan fallback, and MyAnimeList API access.
+- Browse the loaded catalog with title/synopsis search, metadata filters, score filters, and sorting.
+- Open detail pages with poster art, fallback posters, synopsis, metadata, source info, MAL links, and nearby recommendations.
+- Generate recommendations from the search panel, catalog cards, detail pages, recommendation cards, or graph nodes.
+- Filter recommendation results by format, year range, and score range.
+- Sort active recommendations by Match, Score, or year.
+- Visualize the visible recommendation neighborhood in the Network graph.
+- Fall back to bundled/local catalog recommendations when remote lookup or semantic similarity is unavailable.
+- Use a light/dark theme toggle for demo-friendly viewing.
 
-## Catalog browsing
+## Recommendation modes
 
-Use the Catalog tab to browse every anime currently loaded into the app. The catalog supports search across titles and synopses, genre/format/year filters, minimum score filtering, and sorting by popularity, score, year, title, or rank.
+- Metadata: deterministic local matching using genres, themes, demographics, studios, format, year, score/popularity metadata, title overlap, and synopsis text similarity. Cards label this as Metadata match.
+- Semantic: server-side pgvector nearest neighbors from stored anime embeddings. Cards label this as Semantic match and do not show raw vectors or database details.
+- Hybrid: a 65% Metadata and 35% Semantic blend. Cards label this as Hybrid match and show available Metadata, Semantic, and Hybrid score chips.
 
-Catalog cards use the same local/API-loaded anime records as the recommendation flow. Today that means bundled seed data plus the local JSON/API catalog when available; later this view is a natural candidate for Neon-backed querying once the dataset grows beyond what should be filtered in the browser.
+Metadata mode remains usable when the vector endpoint is missing, unavailable, or not configured. Semantic and Hybrid modes show friendly status/empty states instead of raw server errors.
 
-## Anime detail view
+## Tech stack
 
-Catalog cards, recommendation cards, and the currently selected source anime can open a detail view. Details include poster fallback handling, romaji/native titles, synopsis, score, rank, popularity, format/year/episodes, studios, genres, themes, demographics, source metadata, and MyAnimeList links when available.
+- React 19 and TypeScript
+- Vite
+- CSS modules via a single app stylesheet
+- lucide-react icons
+- Local JSON catalog for portable demo data
+- Optional local Node API for catalog lookup and vector similarity
+- Optional Neon Postgres with pgvector for stored semantic neighbors
+- Vercel serverless functions under `api/`
 
-The detail view uses the currently loaded local/API catalog and the existing metadata recommender to show similar anime. It can also start a fresh recommendation run from the displayed anime without introducing separate routes or authentication.
-
-## Hybrid recommendations
-
-The Recommend view supports three selectable modes:
-
-- Metadata: the original explainable rule/metadata recommender using genres, themes, demographics, local synopsis/title text similarity, format, year, studio, and score/popularity metadata.
-- Semantic: pgvector nearest neighbors from stored anime embeddings returned by `/api/vector-similar`. This mode labels vector similarity as the primary score and avoids metadata-only factor bars.
-- Hybrid: a blended ranking using 65% metadata score and 35% semantic similarity. Cards show the available metadata, semantic, and hybrid scores so one-source matches are clear instead of hidden.
-
-OpenAI is used only during offline or trusted server-side embedding generation. Normal recommendation browsing does not call OpenAI from the frontend, does not expose raw embeddings, and does not expose database secrets.
-
-## Explainable recommendations
-
-The Metadata mode is rule/metadata-based and deterministic. The app ranks titles with shared genres, themes, demographics, synopsis text similarity, title overlap, format, year, studio, and score/popularity metadata.
-
-Recommendation cards show a similarity score, a short "Why this matches" summary, top match reasons, and factor bars for the strongest metadata scoring signals. These explanations are intended to describe the current metadata scorer honestly; Semantic mode labels embedding similarity separately.
-
-## Recommendation filters
-
-The Recommend view includes a compact filter popover next to the result-count slider. Users can narrow the explainable metadata-based candidate pool by format, score range, and year range before the app fills the requested number of recommendation cards.
-
-The visible results can also be sorted by match percentage, age, or score. These controls filter and sort the active Metadata, Semantic, or Hybrid recommendation list; they do not change the underlying metadata scoring weights.
-
-## Recommendation network visualization
-
-The Recommend view includes a lightweight SVG recommendation network layered on top of the existing recommendation cards. It visualizes the currently active recommendation mode, so switching between Metadata, Semantic, and Hybrid changes which visible results and scores are drawn.
-
-The selected anime appears as the central source node, with the top visible recommendations placed around it. Edges represent source-to-recommendation similarity: metadata similarity in Metadata mode, stored vector similarity in Semantic mode, and blended hybrid similarity in Hybrid mode. This is a portfolio/demo visualization for quickly scanning neighborhood shape; the detailed recommendation cards remain the primary explanation surface.
-
-## Run it
+## Local setup
 
 ```bash
 npm install
@@ -61,11 +41,9 @@ npm run dev:api
 npm run dev
 ```
 
-Run the API and Vite app in separate terminals. Then open the local URL Vite prints.
+Run the API and Vite app in separate terminals. Open the local URL printed by Vite.
 
-## MyAnimeList API setup
-
-Create a `.env` file:
+Create an ignored `.env` file when using MAL lookup, Neon, or embedding generation:
 
 ```bash
 MAL_CLIENT_ID=your_client_id_here
@@ -75,44 +53,30 @@ DATABASE_URL=your_neon_pooled_connection_string
 VITE_ANIMEREC_API_URL=http://127.0.0.1:8787
 ```
 
-The MAL credentials are used only by local Node scripts. Do not expose the client secret through `VITE_*` variables because those are bundled into browser JavaScript.
+Only `VITE_*` variables are bundled into browser JavaScript. Keep MAL secrets, database URLs, and API keys out of `VITE_*`.
 
-On Vercel, set `MAL_CLIENT_ID`, `MAL_CLIENT_SECRET`, and `MAL_RATE_LIMIT_PER_SECOND` as environment variables. Leave `VITE_ANIMEREC_API_URL` unset so the app calls same-origin `/api` routes.
+## Catalog and MAL data
 
-## Sync MAL catalog data
-
-Fetch and cache:
-
-- Top 100 anime
-- Top 100 airing anime
-- Top 100 upcoming anime
-- Top 100 TV anime
-- Top 100 movies
+The app ships with a bundled catalog and can also use the local API catalog. To refresh the local MAL-backed JSON snapshot:
 
 ```bash
 npm run sync:mal
 ```
 
-The sync script writes deduplicated records to `src/data/animeCatalog.json` and throttles requests with `MAL_RATE_LIMIT_PER_SECOND`, defaulting to 2 requests per second. Its current defaults request up to 3,500 ranked-list rows before deduplication.
+The sync script writes deduplicated records to `src/data/animeCatalog.json` and throttles requests with `MAL_RATE_LIMIT_PER_SECOND`.
 
-## Upload local catalog to Neon
-
-After attaching Neon and adding `DATABASE_URL` to your ignored `.env` file:
+To upload the local catalog into Neon:
 
 ```bash
 npm run db:migrate
 npm run db:import
 ```
 
-The import uploads your locally synced JSON snapshot to Neon. This keeps the larger MAL batch sync off Vercel and avoids unnecessary production API/database traffic.
+## Neon and pgvector notes
 
-## Vector similarity foundation
+Semantic mode depends on precomputed embeddings stored in Neon Postgres with pgvector. The app never stores vectors in `src/data/animeCatalog.json`, and the vector API returns only source metadata, score type, limit, and similar anime results.
 
-AnimeRec can now prepare semantic anime embeddings server-side without changing the visible recommender UI. Embeddings are generated locally or from a trusted server process with OpenAI `text-embedding-3-small` and stored in Neon Postgres using pgvector. No embedding vectors are committed into `src/data/animeCatalog.json`, and no OpenAI API key should ever use a `VITE_*` prefix.
-
-The embedding text is deterministic and intentionally avoids volatile fields such as score, rank, and popularity. It includes romaji/native title, synopsis, genres, themes, demographics, studios, format, and year. The script hashes that final text and skips rows whose hash is already stored for the same anime and embedding model.
-
-Add these values to your ignored `.env` file:
+Add embedding generation values to `.env` only in trusted local/server environments:
 
 ```bash
 DATABASE_URL=your_neon_pooled_connection_string
@@ -124,37 +88,23 @@ EMBEDDING_MAX_RETRIES=5
 EMBEDDING_LIMIT=
 ```
 
-Apply the pgvector migration after the base anime table is available:
-
-```bash
-npm run db:migrate
-```
-
-Run a small embedding test first:
+Run a small smoke test first:
 
 ```bash
 EMBEDDING_LIMIT=3 npm run embeddings:generate
 ```
 
-Run the same command again to confirm unchanged records are skipped. The default embedding pace is conservative for low OpenAI limits: 25 anime per request, at least 10 seconds between batches, and up to 5 retries for rate-limit or temporary server errors. The script logs approximate input tokens per batch, but never logs API keys, database URLs, or full embedding vectors.
-
-For a larger smoke test:
-
-```bash
-EMBEDDING_LIMIT=100 npm run embeddings:generate
-```
-
-Then run the full generation with no `EMBEDDING_LIMIT`. This step only creates the storage foundation; the current Recommend, Catalog, Detail, filters, sorting, and explanation flows still use the existing explainable metadata scorer. The next planned step is a vector similarity API and a hybrid metadata plus semantic recommender.
+Then run a larger sample or omit `EMBEDDING_LIMIT` for the full catalog. The script hashes deterministic embedding text and skips unchanged rows for the same anime/model combination.
 
 ## Vector similarity API
 
-The backend exposes a validation endpoint for stored pgvector neighbors:
+The backend exposes pgvector neighbors at:
 
 ```bash
 GET /api/vector-similar?animeId=5114&limit=20
 ```
 
-`animeId` is the MAL/anime ID stored in Neon. `limit` is optional, defaults to 20, and is clamped between 1 and 50. The endpoint does not call OpenAI; it compares existing stored embeddings only, using cosine distance in Neon/Postgres.
+`animeId` is the MAL/anime ID stored in Neon. `limit` defaults to 20 and is clamped between 1 and 50. The endpoint compares existing stored embeddings only; it does not call embedding generation during normal browsing.
 
 Example response shape:
 
@@ -167,7 +117,6 @@ Example response shape:
       "romaji": "Fullmetal Alchemist: Brotherhood"
     }
   },
-  "embeddingModel": "text-embedding-3-small",
   "scoreType": "vector_semantic_similarity",
   "limit": 20,
   "similar": [
@@ -189,31 +138,21 @@ Example response shape:
 }
 ```
 
-The visible Semantic and Hybrid recommendation modes use this endpoint. It does not return raw vectors, API keys, or database connection details.
+## Deployment notes
 
-## Persistent lookup while developing
+On Vercel, leave `VITE_ANIMEREC_API_URL` unset so the frontend calls same-origin `/api` routes. Configure server-only environment variables such as `MAL_CLIENT_ID`, `MAL_CLIENT_SECRET`, `MAL_RATE_LIMIT_PER_SECOND`, and `DATABASE_URL` in the Vercel project settings.
 
-Run the local API in one terminal:
+The deployed demo is designed to remain usable even if Neon or pgvector is not configured: Metadata recommendations, Catalog, Detail, filters, sorting, poster fallbacks, and the Network graph still work from local catalog data.
 
-```bash
-npm run dev:api
-```
-
-Run the React app in another:
+## Build
 
 ```bash
-npm run dev
+npm run build
 ```
 
-When a user searches for a title or MAL URL, the app checks local JSON storage first. If the local API is running and the anime is missing, it fetches the anime from MAL, appends it to `src/data/animeCatalog.json`, and returns recommendations against the updated catalog.
+## Future improvements
 
-
-## Data plan
-
-Avoid scraping as the primary source unless a site explicitly allows it. A better path is:
-
-1. Use MAL API for exact title/URL lookup and detail hydration.
-2. Store local development data in JSON because it is portable, diffable, and easy to migrate.
-3. Move the same record shape into SQLite/Postgres/Supabase once the catalog and user features grow.
-4. Precompute vectors for each anime so recommendations stay fast as the catalog grows.
-5. Add collaborative signals later from user ratings/watchlists once authentication exists.
+- Add route-level URLs for sharing a selected anime or catalog filter.
+- Add richer graph controls once the demo has a larger production catalog.
+- Expand automated interaction tests around mode switching and API failure states.
+- Improve catalog ingestion coverage for sparse or obscure anime records.
