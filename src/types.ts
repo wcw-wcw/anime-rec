@@ -80,6 +80,27 @@ export interface Recommendation {
 
 export type RecommendationMode = "metadata" | "semantic" | "hybrid";
 
+export interface RecommendationGraphNode {
+  id: string;
+  anime: Anime;
+  role: "source" | "recommendation";
+  score?: number;
+}
+
+export interface RecommendationGraphEdge {
+  id: string;
+  sourceId: string;
+  targetId: string;
+  score: number;
+  mode: RecommendationMode;
+  label?: string;
+}
+
+export interface RecommendationGraphData {
+  nodes: RecommendationGraphNode[];
+  edges: RecommendationGraphEdge[];
+}
+
 export interface VectorSimilarAnimeResult {
   anime: Anime;
   vectorDistance?: number;

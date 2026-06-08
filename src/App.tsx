@@ -1,8 +1,8 @@
 import { FormEvent, useEffect, useMemo, useState } from "react";
-import { ArrowLeft, Brain, Calendar, ExternalLink, Gauge, ImageOff, Info, Library, LinkIcon, Search, SlidersHorizontal, Sparkles, Star } from "lucide-react";
+import { ArrowLeft, Brain, Calendar, ExternalLink, Gauge, ImageOff, Info, Library, LinkIcon, Network, Search, SlidersHorizontal, Sparkles, Star } from "lucide-react";
 import { localCatalog } from "./data/catalog";
 import { CatalogApiProvider, JikanProvider, LocalCatalogProvider } from "./services/animeProvider";
-import type { Anime, Recommendation, RecommendationFilters, RecommendationMode, RecommendationSortMode } from "./types";
+import type { Anime, Recommendation, RecommendationFilters, RecommendationGraphData, RecommendationMode, RecommendationSortMode } from "./types";
 import {
   filterAnimeCatalog,
   formatAnimeMetadata,
@@ -58,6 +58,65 @@ const recommendationModeOptions: Array<{ value: RecommendationMode; label: strin
   { value: "semantic", label: "Semantic" },
   { value: "hybrid", label: "Hybrid" },
 ];
+const graphSizeOptions = [5, 8, 12];
+
+const clampPercentScore = (value: number | undefined) => {
+  if (!Number.isFinite(value)) return 0;
+  return Math.min(100, Math.max(0, Math.round((value ?? 0) * 100)));
+};
+
+const recommendationGraphId = (anime: Anime) => String(anime.malId ?? anime.id);
+
+const graphScoreFor = (rec: Recommendation, mode: RecommendationMode) => {
+  if (mode === "metadata") return rec.metadataScore ?? rec.score;
+  if (mode === "semantic") return rec.vectorSimilarity ?? rec.score;
+  return rec.hybridScore ?? rec.score;
+};
+
+const graphLabelFor = (rec: Recommendation, mode: RecommendationMode) => {
+  const explicitReason = rec.explanation.topReasons[0] ?? rec.reasons[0];
+  if (explicitReason && !/^Semantic similarity:/i.test(explicitReason)) {
+    return explicitReason.length > 28 ? `${explicitReason.slice(0, 25)}...` : explicitReason;
+  }
+  if (mode === "metadata") return "metadata match";
+  if (mode === "semantic") return "semantic match";
+  return "hybrid match";
+};
+
+const buildRecommendationGraphData = (source: Anime, recommendations: Recommendation[], mode: RecommendationMode): RecommendationGraphData => {
+  const sourceId = `source-${recommendationGraphId(source)}`;
+  const recommendationNodes = recommendations.map((rec) => {
+    const animeId = recommendationGraphId(rec.anime);
+    return {
+      id: `rec-${animeId}`,
+      anime: rec.anime,
+      role: "recommendation" as const,
+      score: graphScoreFor(rec, mode),
+    };
+  });
+
+  return {
+    nodes: [
+      {
+        id: sourceId,
+        anime: source,
+        role: "source",
+      },
+      ...recommendationNodes,
+    ],
+    edges: recommendations.map((rec) => {
+      const animeId = recommendationGraphId(rec.anime);
+      return {
+        id: `${sourceId}-rec-${animeId}`,
+        sourceId,
+        targetId: `rec-${animeId}`,
+        score: graphScoreFor(rec, mode),
+        mode,
+        label: graphLabelFor(rec, mode),
+      };
+    }),
+  };
+};
 
 const SourcePill = ({ source }: { source: Anime["source"] }) => (
   <span className={`source source-${source}`}>{source === "mal" ? "MAL" : source === "jikan" ? "Jikan" : "Local"}</span>
@@ -126,6 +185,132 @@ const AnimePoster = ({ anime, className = "" }: { anime: Anime; className?: stri
   return <img className={className} src={anime.imageUrl} alt="" onError={() => setFailed(true)} />;
 };
 
+const RecommendationNetwork = ({
+  source,
+  recommendations,
+  mode,
+  limit,
+  isLoading,
+  onLimitChange,
+  onPickRecommendation,
+}: {
+  source: Anime;
+  recommendations: Recommendation[];
+  mode: RecommendationMode;
+  limit: number;
+  isLoading: boolean;
+  onLimitChange: (limit: number) => void;
+  onPickRecommendation: (anime: Anime) => void;
+}) => {
+  const graphRecommendations = recommendations.slice(0, limit);
+  const graph = useMemo(
+    () => buildRecommendationGraphData(source, graphRecommendations, mode),
+    [graphRecommendations, mode, source],
+  );
+  const recommendationNodes = graph.nodes.filter((node) => node.role === "recommendation");
+  const sourceNode = graph.nodes.find((node) => node.role === "source");
+  const center = { x: 450, y: 172 };
+  const radiusX = 318;
+  const radiusY = 112;
+  const nodePositions = new Map<string, { x: number; y: number }>();
+
+  recommendationNodes.forEach((node, index) => {
+    const angle = -Math.PI / 2 + (index / Math.max(recommendationNodes.length, 1)) * Math.PI * 2;
+    nodePositions.set(node.id, {
+      x: center.x + Math.cos(angle) * radiusX,
+      y: center.y + Math.sin(angle) * radiusY,
+    });
+  });
+
+  return (
+    <section className="network-section" aria-label="Recommendation network visualization">
+      <div className="network-heading">
+        <div>
+          <span className="eyebrow"><Network size={16} /> Network</span>
+          <h3>{recommendationModeOptions.find((option) => option.value === mode)?.label ?? "Active"} recommendation graph</h3>
+        </div>
+        <div className="network-size-control" aria-label="Graph size">
+          {graphSizeOptions.map((option) => (
+            <button key={option} type="button" className={limit === option ? "active" : ""} onClick={() => onLimitChange(option)}>
+              Top {option}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      {isLoading ? (
+        <div className="network-state">
+          <Brain size={18} />
+          <span>Loading graph from stored semantic similarity.</span>
+        </div>
+      ) : recommendationNodes.length === 0 || !sourceNode ? (
+        <div className="network-state">
+          <Search size={18} />
+          <span>No visible recommendations are available for the graph.</span>
+        </div>
+      ) : (
+        <div className="network-canvas">
+          <svg className="network-svg" viewBox="0 0 900 344" role="img" aria-label={`${titleFor(source)} connected to ${recommendationNodes.length} recommendations`}>
+            <defs>
+              <marker id="edge-dot" markerWidth="7" markerHeight="7" refX="3.5" refY="3.5">
+                <circle cx="3.5" cy="3.5" r="2.5" fill="#25766f" />
+              </marker>
+            </defs>
+            {graph.edges.map((edge) => {
+              const target = nodePositions.get(edge.targetId);
+              if (!target) return null;
+              const scorePercent = clampPercentScore(edge.score);
+              const width = 1.5 + (scorePercent / 100) * 5.5;
+              const labelX = center.x + (target.x - center.x) * 0.58;
+              const labelY = center.y + (target.y - center.y) * 0.58;
+              return (
+                <g key={edge.id} className={`network-edge network-edge-${edge.mode}`}>
+                  <line
+                    x1={center.x}
+                    y1={center.y}
+                    x2={target.x}
+                    y2={target.y}
+                    strokeWidth={width}
+                    markerEnd="url(#edge-dot)"
+                  />
+                  <text x={labelX} y={labelY}>
+                    {scorePercent}% · {edge.label}
+                  </text>
+                </g>
+              );
+            })}
+          </svg>
+
+          <div className="network-source-node" style={{ left: `${(center.x / 900) * 100}%`, top: `${(center.y / 344) * 100}%` }}>
+            <AnimePoster anime={source} />
+            <span>{titleFor(source)}</span>
+          </div>
+
+          {recommendationNodes.map((node) => {
+            const position = nodePositions.get(node.id);
+            if (!position) return null;
+            const scorePercent = clampPercentScore(node.score);
+            return (
+              <button
+                key={node.id}
+                type="button"
+                className="network-rec-node"
+                style={{ left: `${(position.x / 900) * 100}%`, top: `${(position.y / 344) * 100}%` }}
+                onClick={() => onPickRecommendation(node.anime)}
+                title={`Recommend from ${titleFor(node.anime)}`}
+              >
+                <AnimePoster anime={node.anime} />
+                <span>{titleFor(node.anime)}</span>
+                <strong>{scorePercent}%</strong>
+              </button>
+            );
+          })}
+        </div>
+      )}
+    </section>
+  );
+};
+
 const ChipList = ({ items, emptyLabel = "Unknown" }: { items: string[] | undefined; emptyLabel?: string }) => {
   const values = items?.filter(Boolean) ?? [];
   if (!values.length) return <span className="muted-chip">{emptyLabel}</span>;
@@ -151,6 +336,7 @@ export function App() {
   const [recommendationFilters, setRecommendationFilters] = useState<RecommendationFilters>(defaultRecommendationFilters);
   const [recommendationSort, setRecommendationSort] = useState<RecommendationSortMode>("similarity_desc");
   const [recommendationMode, setRecommendationMode] = useState<RecommendationMode>("metadata");
+  const [recommendationGraphLimit, setRecommendationGraphLimit] = useState(8);
   const [isFilterOpen, setIsFilterOpen] = useState(false);
   const [selected, setSelected] = useState<Anime | null>(defaultAnime);
   const [metadataRecommendations, setMetadataRecommendations] = useState<Recommendation[]>(() =>
@@ -242,6 +428,7 @@ export function App() {
   }, [visibleRecommendations]);
   const topScore = visibleRecommendations.reduce((max, rec) => Math.max(max, rec.score), 0);
   const topSynopsisScore = visibleRecommendations.reduce((max, rec) => Math.max(max, rec.breakdown.synopsis), 0);
+  const isRecommendationGraphLoading = recommendationMode !== "metadata" && semanticState === "loading";
 
   useEffect(() => {
     if (!selected || recommendationMode === "metadata") return;
@@ -981,36 +1168,15 @@ export function App() {
               </section>
             ) : (
               <>
-                <div className="graph-card">
-                  <div className="graph-legend">
-                    <span><i className="tone-strong" /> Very close</span>
-                    <span><i className="tone-good" /> Good fit</span>
-                    <span><i className="tone-moderate" /> Similar</span>
-                    <span><i className="tone-light" /> Looser</span>
-                  </div>
-                  {visibleRecommendations.map((rec, index) => {
-                    const strength = matchStrength(rec.score, topScore);
-                    const tone = strengthTone(strength);
-                    return (
-                      <div
-                        key={rec.anime.id}
-                        className={`graph-node graph-node-${tone}`}
-                        style={{
-                          left: `${12 + ((index * 19) % 76)}%`,
-                          top: `${22 + ((index * 31) % 54)}%`,
-                          width: `${48 + strength * 0.62}px`,
-                          height: `${48 + strength * 0.62}px`,
-                        }}
-                        title={`${titleFor(rec.anime)}: ${strength} match strength`}
-                      >
-                        {strength}
-                      </div>
-                    );
-                  })}
-                  <div className="graph-caption">
-                    Bigger circles are stronger matches. Color shows closeness tier. Position is a loose spread to make clusters readable, not a map coordinate.
-                  </div>
-                </div>
+                <RecommendationNetwork
+                  source={selected}
+                  recommendations={visibleRecommendations}
+                  mode={recommendationMode}
+                  limit={recommendationGraphLimit}
+                  isLoading={isRecommendationGraphLoading}
+                  onLimitChange={setRecommendationGraphLimit}
+                  onPickRecommendation={recommendFromAnime}
+                />
 
                 <div className="cluster-stack">
                   {Object.entries(grouped).map(([cluster, items]) => (

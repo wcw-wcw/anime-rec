@@ -47,6 +47,12 @@ The Recommend view includes a compact filter popover next to the result-count sl
 
 The visible results can also be sorted by match percentage, age, or score. These controls filter and sort the active Metadata, Semantic, or Hybrid recommendation list; they do not change the underlying metadata scoring weights.
 
+## Recommendation network visualization
+
+The Recommend view includes a lightweight SVG recommendation network layered on top of the existing recommendation cards. It visualizes the currently active recommendation mode, so switching between Metadata, Semantic, and Hybrid changes which visible results and scores are drawn.
+
+The selected anime appears as the central source node, with the top visible recommendations placed around it. Edges represent source-to-recommendation similarity: metadata similarity in Metadata mode, stored vector similarity in Semantic mode, and blended hybrid similarity in Hybrid mode. This is a portfolio/demo visualization for quickly scanning neighborhood shape; the detailed recommendation cards remain the primary explanation surface.
+
 ## Run it
 
 ```bash
