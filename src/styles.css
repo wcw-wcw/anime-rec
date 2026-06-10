@@ -162,7 +162,8 @@ a {
   min-width: 0;
   border: 0;
   outline: 0;
-  color: #182530;
+  background: transparent;
+  color: inherit;
 }
 
 .search-row button {
@@ -1107,7 +1108,8 @@ a {
   width: 100%;
   border: 0;
   outline: 0;
-  color: #182530;
+  background: transparent;
+  color: inherit;
 }
 
 .catalog-grid {
