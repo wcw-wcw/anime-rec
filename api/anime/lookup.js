@@ -22,6 +22,7 @@ export default async function handler(request, response) {
     const sql = databaseConfigured() ? getSql() : null;
     if (sql) await ensureAnimeTable(sql);
     const databaseCatalog = sql ? await getDatabaseCatalog(sql) : [];
+    // Prefer stored data before calling MAL so deploys stay fast and secrets remain server-side.
     const catalog = databaseCatalog.length ? databaseCatalog : await readCatalog();
     const existing = findExistingAnime(catalog, query);
     if (existing) {

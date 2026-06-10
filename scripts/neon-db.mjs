@@ -122,6 +122,7 @@ export async function getVectorSimilarAnime({ animeId, limit = 20, model = "text
 
   const rows = await sql.query(
     `
+      -- Cosine distance is provided by pgvector's <=> operator; lower is nearer.
       with source_embedding as (
         select embedding
         from animerec.anime_embeddings
@@ -320,6 +321,7 @@ function fromDatabaseRow(row) {
 }
 
 function normalizeVectorSimilarity(distance) {
+  // pgvector cosine distance is 0 for identical vectors and approaches 1 as similarity falls.
   if (!Number.isFinite(distance)) return 0;
   return Math.max(0, Math.min(100, (1 - distance) * 100));
 }

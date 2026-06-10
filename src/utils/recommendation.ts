@@ -115,6 +115,7 @@ const buildIdf = (catalog: Anime[]) => {
   return idf;
 };
 
+// Local TF-IDF keeps Metadata mode deterministic and usable without the vector API.
 const vectorizeText = (value: string, idf: Map<string, number>) => {
   const tokens = tokenize(value);
   const counts = new Map<string, number>();
@@ -167,6 +168,7 @@ const FRANCHISE_NOISE = new Set([
   "the",
 ]);
 
+// Recommendations intentionally collapse obvious sequels/spinoffs so the list feels exploratory.
 export const franchiseKey = (anime: Anime) => {
   const baseTitle = titleForKey(anime)
     .replace(/\([^)]*\)/g, " ")
@@ -461,6 +463,7 @@ export const mergeMetadataAndVectorRecommendations = (
   metadataResults: Recommendation[],
   vectorResults: Recommendation[] | VectorSimilarAnimeResult[],
 ): HybridRecommendationResult[] => {
+  // Keep partial coverage visible: a row can come from metadata only, semantic only, or both.
   const metadataByKey = new Map(metadataResults.map((result) => [resultKey(result.anime), result]));
   const semanticResults = vectorResultsToRecommendations(
     vectorResults.map((result) =>

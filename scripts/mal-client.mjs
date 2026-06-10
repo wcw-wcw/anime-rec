@@ -30,6 +30,7 @@ export async function createMalClient() {
   const spacingMs = Math.ceil(1000 / Math.max(0.25, perSecond));
 
   async function request(path, params = {}) {
+    // MAL rate limits are handled with spacing instead of parallel fetches.
     const elapsed = Date.now() - lastRequestAt;
     if (elapsed < spacingMs) await delay(spacingMs - elapsed);
     lastRequestAt = Date.now();

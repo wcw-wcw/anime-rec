@@ -117,6 +117,7 @@ async function assertEmbeddingSchema(sql) {
 
 async function flushBatch(records, { batchDelayMs, maxRetries, model, sql }) {
   const approximateTokens = estimateTokens(records.map((record) => record.embeddingText));
+  // The delay is conservative because this script is often run on low-limit personal keys.
   const safeDelayMs = Math.max(batchDelayMs, Math.ceil((approximateTokens / TOKENS_PER_MINUTE_LIMIT) * 60000));
   console.log(`Embedding batch: ${records.length} anime, about ${approximateTokens} input tokens, next-delay ${safeDelayMs}ms.`);
 
